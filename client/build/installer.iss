@@ -1,8 +1,9 @@
 ; Loki-PrintServer Windows Installer (Inno Setup)
-#define MyAppName "Loki-PrintServer"
+; NOTE: All paths are relative to the location of this .iss file (client/build/)
+#define MyAppName "Loki-Client"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "BangerTECH"
-#define MyAppURL "https://github.com/YOUR_USERNAME/loki-printserver"
+#define MyAppURL "https://github.com/BangerTech/Loki-PrintServer"
 #define MyAppExeName "LokiClient.exe"
 
 [Setup]
@@ -13,9 +14,9 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
-OutputDir=dist
+OutputDir=..\dist
 OutputBaseFilename=LokiClient-Setup
-SetupIconFile=build\icon.ico
+SetupIconFile=..\assets\icon.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -30,7 +31,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startupitem"; Description: "Start Loki-PrintServer at login"; GroupDescription: "Auto-start:"
 
 [Files]
-Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

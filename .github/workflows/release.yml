@@ -46,7 +46,15 @@ jobs:
         run: client\build\build_windows.bat
         shell: cmd
 
-      - name: Upload EXE
+      - name: Upload installer (preferred)
+        if: hashFiles('client/dist/LokiClient-Setup.exe') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Loki-Client-windows
+          path: client/dist/LokiClient-Setup.exe
+
+      - name: Upload raw EXE (fallback)
+        if: hashFiles('client/dist/LokiClient-Setup.exe') == ''
         uses: actions/upload-artifact@v4
         with:
           name: Loki-Client-windows
@@ -144,6 +152,7 @@ jobs:
             > macOS: First launch → right-click → Open
           files: |
             release-assets/Loki-Client-mac/Loki-Client.dmg
+            release-assets/Loki-Client-windows/LokiClient-Setup.exe
             release-assets/Loki-Client-windows/LokiClient.exe
             release-assets/Loki-Client-linux/Loki-Client-linux
           draft: false
