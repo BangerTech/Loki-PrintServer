@@ -25,6 +25,20 @@ pip3 install --quiet pyinstaller pillow rumps zeroconf httpx websockets \
     customtkinter pystray packaging 2>&1 | grep -E "Successfully|already|ERROR" || true
 brew install socat 2>/dev/null || true
 
+# universal2 builds require ALL native extensions to be fat binaries.
+# Pillow's arm64 wheel contains _imagingtk.so as arm64-only, which makes
+# PyInstaller fail. Reinstall Pillow as universal2 wheel when building in CI.
+if [ "${CI:-}" = "true" ] && [ "$(uname -m)" = "arm64" ]; then
+    echo "    Reinstalling Pillow as universal2 wheel for fat binary support..."
+    pip3 download pillow \
+        --platform macosx_11_0_universal2 \
+        --only-binary :all: \
+        -d /tmp/pillow_u2 --quiet 2>/dev/null \
+    && pip3 install /tmp/pillow_u2/Pillow*.whl --force-reinstall --quiet \
+    && echo "    Pillow universal2 installed." \
+    || echo "    Warning: universal2 Pillow unavailable, build may fail."
+fi
+
 # ── 2. Convert icon → .icns ────────────────────────────────────────────────────
 echo "[2/5] Creating .icns icon..."
 mkdir -p build/LokiClient.iconset
