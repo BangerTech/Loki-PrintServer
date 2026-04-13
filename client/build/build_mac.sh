@@ -1,51 +1,90 @@
 #!/bin/bash
 # Loki-Client — macOS .app + .dmg Builder
-# Run this on your Mac: cd ~/Loki-Client && bash build/build_mac.sh
+# Run from repo root: bash client/build/build_mac.sh
 set -e
 
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/../.."
+ROOT="$(pwd)"
+CLIENT="$ROOT/client"
+
 APPNAME="Loki-Client"
 BUNDLE_ID="com.bangertech.loki-client"
+VERSION="1.0.0"
 
 echo "=========================================="
-echo "  Loki-Client — macOS Build"
+echo "  Loki-Client v${VERSION} — macOS Build"
 echo "  by BangerTECH"
 echo "=========================================="
 
-# ── 1. Dependencies ────────────────────────────────────────────────────────────
-echo "[1/5] Installing Python dependencies..."
-pip3 install --quiet pyinstaller pillow rumps zeroconf httpx websockets \
-    customtkinter pystray packaging
+cd "$CLIENT"
 
-echo "[1/5] Installing socat (serial forwarding)..."
+# ── 1. Dependencies ────────────────────────────────────────────────────────────
+echo "[1/5] Installing dependencies..."
+pip3 install --quiet pyinstaller pillow rumps zeroconf httpx websockets \
+    customtkinter pystray packaging 2>&1 | grep -E "Successfully|already|ERROR" || true
 brew install socat 2>/dev/null || true
 
-# ── 2. Convert PNG icon → .icns (required for macOS apps) ────────────────────
+# ── 2. Convert icon → .icns ────────────────────────────────────────────────────
 echo "[2/5] Creating .icns icon..."
-ICONSET="build/LokiClient.iconset"
-mkdir -p "$ICONSET"
+mkdir -p build/LokiClient.iconset
 for SIZE in 16 32 64 128 256 512; do
-    cp "assets/icon_${SIZE}.png" "${ICONSET}/icon_${SIZE}x${SIZE}.png"
-    cp "assets/icon_${SIZE}.png" "${ICONSET}/icon_${SIZE}x${SIZE}@2x.png" 2>/dev/null || true
+    cp "assets/icon_${SIZE}.png" "build/LokiClient.iconset/icon_${SIZE}x${SIZE}.png"
+    cp "assets/icon_${SIZE}.png" "build/LokiClient.iconset/icon_${SIZE}x${SIZE}@2x.png" 2>/dev/null || true
 done
-iconutil -c icns "$ICONSET" -o "build/LokiClient.icns" 2>/dev/null || \
-    cp "assets/icon_512.png" "build/LokiClient.icns"
-rm -rf "$ICONSET"
-echo "    Icon created."
+iconutil -c icns "build/LokiClient.iconset" -o "build/LokiClient.icns" 2>/dev/null \
+    && echo "    .icns created" \
+    || { echo "    iconutil failed, using PNG"; cp "assets/icon_512.png" "build/LokiClient.icns"; }
+rm -rf build/LokiClient.iconset
 
-# ── 3. PyInstaller build ───────────────────────────────────────────────────────
-echo "[3/5] Building ${APPNAME}.app..."
-rm -rf dist build/__pycache__
+# ── 3. Write Info.plist (LSUIElement = menu bar only, no dock icon) ────────────
+echo "[3/5] Writing Info.plist..."
+cat > build/Info.plist << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Loki-Client</string>
+    <key>CFBundleDisplayName</key>
+    <string>Loki-Client</string>
+    <key>CFBundleIdentifier</key>
+    <string>${BUNDLE_ID}</string>
+    <key>CFBundleVersion</key>
+    <string>${VERSION}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${VERSION}</string>
+    <key>CFBundleExecutable</key>
+    <string>Loki-Client</string>
+    <key>CFBundleIconFile</key>
+    <string>LokiClient</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+</dict>
+</plist>
+EOF
+
+# ── 4. PyInstaller ─────────────────────────────────────────────────────────────
+echo "[4/5] Building ${APPNAME}.app with PyInstaller..."
+rm -rf dist "${APPNAME}.spec"
 
 pyinstaller \
     --name "$APPNAME" \
     --windowed \
     --onedir \
     --noconfirm \
+    --clean \
     --osx-bundle-identifier "$BUNDLE_ID" \
     --icon "build/LokiClient.icns" \
     --add-data "core:core" \
     --add-data "assets:assets" \
+    --add-data "onboarding.py:." \
     --hidden-import "onboarding" \
     --hidden-import "core.api_client" \
     --hidden-import "core.config" \
@@ -55,51 +94,50 @@ pyinstaller \
     --hidden-import "zeroconf._utils.ipaddress" \
     --hidden-import "zeroconf._handlers.answers" \
     --hidden-import "zeroconf._handlers.browser" \
+    --hidden-import "zeroconf._handlers.record_manager" \
+    --hidden-import "zeroconf._services.browser" \
     --collect-all "rumps" \
     --collect-all "zeroconf" \
     --collect-all "customtkinter" \
     --paths "." \
     tray_app.py
 
-# Copy onboarding module into the app (needed as importable Python file)
-cp onboarding.py "dist/${APPNAME}/_internal/" 2>/dev/null || \
-    cp onboarding.py "dist/${APPNAME}/" 2>/dev/null || true
+# Inject correct Info.plist (LSUIElement = true → no dock icon, lives in menu bar)
+echo "    Injecting Info.plist..."
+cp build/Info.plist "dist/${APPNAME}.app/Contents/Info.plist"
 
-echo "    ${APPNAME}.app created."
+# Make sure onboarding.py is importable inside the bundle
+INTERNAL="dist/${APPNAME}.app/Contents/MacOS"
+[ ! -f "${INTERNAL}/onboarding.py" ] && cp onboarding.py "${INTERNAL}/" 2>/dev/null || true
+INTERNAL2="dist/${APPNAME}/_internal"
+[ -d "$INTERNAL2" ] && [ ! -f "${INTERNAL2}/onboarding.py" ] && cp onboarding.py "${INTERNAL2}/" 2>/dev/null || true
 
-# ── 4. Code sign (optional, skip if no Apple cert) ────────────────────────────
-if security find-identity -p codesigning -v 2>/dev/null | grep -q "Developer ID"; then
-    echo "[4/5] Code signing..."
-    codesign --force --deep --sign "Developer ID Application" \
-        "dist/${APPNAME}.app" 2>/dev/null && echo "    Signed." || echo "    Signing failed, continuing anyway."
-else
-    echo "[4/5] Skipping code signing (no Developer ID found)"
-    echo "    Users may need to right-click → Open on first launch."
-fi
+echo "    ${APPNAME}.app ready."
 
-# ── 5. Create .dmg ────────────────────────────────────────────────────────────
+# ── 5. DMG ─────────────────────────────────────────────────────────────────────
 echo "[5/5] Creating ${APPNAME}.dmg..."
 rm -f "dist/${APPNAME}.dmg"
 
 if command -v create-dmg &>/dev/null; then
     create-dmg \
-        --volname "$APPNAME" \
+        --volname "Loki-Client" \
         --volicon "build/LokiClient.icns" \
         --window-pos 200 120 \
-        --window-size 620 420 \
+        --window-size 540 380 \
         --icon-size 120 \
-        --icon "${APPNAME}.app" 180 200 \
+        --icon "${APPNAME}.app" 140 190 \
         --hide-extension "${APPNAME}.app" \
-        --app-drop-link 440 200 \
-        --background "assets/logo.png" \
+        --app-drop-link 400 190 \
         --no-internet-enable \
         "dist/${APPNAME}.dmg" \
-        "dist/${APPNAME}/"
+        "dist/${APPNAME}.app" 2>/dev/null \
+    || hdiutil create -volname "Loki-Client" \
+        -srcfolder "dist/${APPNAME}.app" \
+        -ov -format UDZO "dist/${APPNAME}.dmg"
 else
-    # Fallback: hdiutil
     hdiutil create \
-        -volname "$APPNAME" \
-        -srcfolder "dist/${APPNAME}/" \
+        -volname "Loki-Client" \
+        -srcfolder "dist/${APPNAME}.app" \
         -ov -format UDZO \
         "dist/${APPNAME}.dmg"
 fi
@@ -108,10 +146,11 @@ echo ""
 echo "=========================================="
 echo "  ✓ Build complete!"
 echo ""
-echo "  DMG: dist/${APPNAME}.dmg"
+echo "  client/dist/${APPNAME}.dmg"
 echo ""
-echo "  → Double-click the .dmg"
-echo "  → Drag Loki-Client to Applications"
-echo "  → First launch: right-click → Open"
-echo "    (only needed once, no Apple cert)"
+echo "  Installation:"
+echo "  1. Öffne die .dmg"
+echo "  2. Ziehe Loki-Client in Applications"
+echo "  3. Rechtsklick → Öffnen (einmalig)"
+echo "  4. Loki erscheint oben in der Menüleiste"
 echo "=========================================="

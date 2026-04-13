@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Loki-PrintServer</title>
+  <link rel="icon" type="image/png" href="/assets/icon_32.png">
+  <link rel="apple-touch-icon" href="/assets/icon_128.png">
   <style>
     :root {
       --bg: #0a0f1e;
@@ -96,7 +98,8 @@
 </head>
 <body>
   <header>
-    <img src="/assets/icon_64.png" alt="Loki" style="width:44px;height:44px;border-radius:10px;">
+    <img src="/assets/icon_64.png" alt="Loki" style="width:44px;height:44px;border-radius:10px;" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+    <div style="display:none;width:44px;height:44px;background:var(--accent);border-radius:10px;align-items:center;justify-content:center;font-weight:bold;color:#0a0f1e;font-size:20px">L</div>
     <div>
       <h1>Loki-PrintServer <span id="version">v1.0.0</span></h1>
     </div>
