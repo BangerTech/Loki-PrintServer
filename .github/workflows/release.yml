@@ -123,10 +123,17 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
 
+      - name: Delete existing release (so body gets recreated)
+        run: gh release delete "${{ github.ref_name }}" --yes || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           name: "Loki-Client ${{ steps.version.outputs.VERSION }}"
+          make_latest: true
           body: |
             ## Loki-PrintServer ${{ steps.version.outputs.VERSION }}
             by BangerTECH
@@ -144,11 +151,15 @@ jobs:
 
             | Platform | File |
             |----------|------|
-            | macOS (Intel + Apple Silicon via Rosetta 2) | `Loki-Client.dmg` |
+            | macOS | `Loki-Client.dmg` |
             | Windows | `LokiClient-Setup.exe` |
             | Linux | `Loki-Client-linux` |
 
-            > macOS: First launch → right-click → Open
+            > **macOS Gatekeeper:** After opening the DMG and dragging to Applications, run once in Terminal:
+            > ```
+            > xattr -cr /Applications/Loki-Client.app
+            > ```
+            > Then right-click → Open. This is only needed on first launch.
           files: |
             release-assets/Loki-Client-mac/Loki-Client.dmg
             release-assets/Loki-Client-windows/LokiClient-Setup.exe

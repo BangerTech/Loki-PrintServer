@@ -112,6 +112,9 @@ INTERNAL="dist/${APPNAME}.app/Contents/MacOS"
 INTERNAL2="dist/${APPNAME}/_internal"
 [ -d "$INTERNAL2" ] && [ ! -f "${INTERNAL2}/onboarding.py" ] && cp onboarding.py "${INTERNAL2}/" 2>/dev/null || true
 
+echo "    Ad-hoc code-signing ${APPNAME}.app..."
+codesign --force --deep --sign - "dist/${APPNAME}.app"
+
 echo "    ${APPNAME}.app ready."
 
 # ── 5. DMG ─────────────────────────────────────────────────────────────────────
