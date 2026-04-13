@@ -8,12 +8,10 @@ Usage:
 """
 import argparse
 import platform
-import sys
 import threading
 import time
 import tkinter as tk
-import tkinter.font as tkfont
-from tkinter import messagebox, simpledialog
+from tkinter import messagebox
 from typing import Optional
 
 try:
@@ -402,7 +400,7 @@ class LokiClientApp:
 
     def _detach_device(self, dev: DeviceInfo):
         def _do():
-            result = self.attacher.detach(dev.bus_id)
+            self.attacher.detach(dev.bus_id)
             self.root.after(0, lambda: self._refresh_devices())
         threading.Thread(target=_do, daemon=True).start()
 

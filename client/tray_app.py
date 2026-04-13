@@ -25,18 +25,18 @@ try:
 except ImportError:
     HAS_RUMPS = False
 
+from core.api_client import DeviceInfo, LokiAPIClient, ServerStatus  # noqa: E402
+from core.config import LokiConfig, ServerEntry  # noqa: E402
+from core.device_db import get_display_name  # noqa: E402
+from core.discovery import DiscoveredServer, LokiDiscovery  # noqa: E402
+from core.usbip_attach import AttachStatus, USBIPAttacher  # noqa: E402
+
 try:
     import pystray
-    from PIL import Image, ImageDraw
+    from PIL import Image
     HAS_PYSTRAY = True
 except ImportError:
     HAS_PYSTRAY = False
-
-from core.api_client import DeviceInfo, LokiAPIClient, ServerStatus
-from core.config import LokiConfig, ServerEntry
-from core.device_db import get_display_name
-from core.discovery import DiscoveredServer, LokiDiscovery
-from core.usbip_attach import AttachStatus, USBIPAttacher
 
 
 def make_tray_icon(connected: bool = False, size: int = 64) -> "Image.Image":
@@ -309,7 +309,7 @@ if HAS_RUMPS:
 
         def _toggle_device(self, dev: DeviceInfo, conn: ServerConnection):
             if dev.bus_id in self.attacher.get_attached():
-                result = self.attacher.detach(dev.bus_id)
+                self.attacher.detach(dev.bus_id)
                 rumps.notification("Detached", dev.display_name, "")
             else:
                 self._share_and_attach(dev, conn)

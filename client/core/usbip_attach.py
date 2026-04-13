@@ -147,7 +147,7 @@ class DeviceAttacher:
             time.sleep(1)
             local = self._find_new_device()
             return AttachResult(AttachStatus.ATTACHED, AttachMethod.USBIP,
-                                f"USB device attached via USB/IP", local)
+                                "USB device attached via USB/IP", local)
         return AttachResult(AttachStatus.ERROR, message=r.stderr.strip() or r.stdout.strip())
 
     def _attach_usbip_windows(self, server_ip: str, bus_id: str) -> AttachResult:
@@ -288,7 +288,7 @@ class DeviceAttacher:
         com2tcp = shutil.which("com2tcp.exe")
         if com2tcp:
             proc = subprocess.Popen(
-                [com2tcp, f"\\\\.\\CNCB0", server_ip, str(port)],
+                [com2tcp, "\\\\.\\CNCB0", server_ip, str(port)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
             time.sleep(1)
@@ -313,7 +313,7 @@ class DeviceAttacher:
         # Kill any socat processes for this device
         if OS in ("Linux", "Darwin"):
             _run(["pkill", "-f", f"loki.*{bus_id}"])
-            _run(["pkill", "-f", f"tty.loki"])
+            _run(["pkill", "-f", "tty.loki"])
         return AttachResult(AttachStatus.DETACHED, message="Serial bridge stopped")
 
     # ══════════════════════════════════════════════════════════════════════════

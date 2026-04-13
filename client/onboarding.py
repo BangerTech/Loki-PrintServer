@@ -4,9 +4,7 @@ Shows on first launch. Discovers servers, lets user connect.
 Modern dark UI via customtkinter.
 """
 import threading
-import time
 import tkinter as tk
-from tkinter import font as tkfont
 from typing import Callable, Optional
 
 try:
@@ -18,7 +16,7 @@ except ImportError:
     HAS_CTK = False
 
 from core.api_client import LokiAPIClient
-from core.config import LokiConfig, ServerEntry
+from core.config import LokiConfig
 from core.discovery import DiscoveredServer, LokiDiscovery
 
 
@@ -260,14 +258,18 @@ class OnboardingWindow:
                 btn_card.configure(bg=CARD)
                 btn_dot.configure(fg=BORDER, bg=CARD)
                 for w in btn_card.winfo_children():
-                    try: w.configure(bg=CARD)
-                    except Exception: pass
+                    try:
+                        w.configure(bg=CARD)
+                    except Exception:
+                        pass
             # Highlight selected
             c.configure(bg="#0d2a22")
             d.configure(fg=ACCENT, bg="#0d2a22")
             for w in c.winfo_children():
-                try: w.configure(bg="#0d2a22")
-                except Exception: pass
+                try:
+                    w.configure(bg="#0d2a22")
+                except Exception:
+                    pass
             # Enable next button
             if self._next_btn_ref:
                 self._next_btn_ref.configure(state=tk.NORMAL, bg=ACCENT)
@@ -327,7 +329,7 @@ class OnboardingWindow:
             client = LokiAPIClient(server.ip, server.api_port)
             ok = client.check_health()
             if ok:
-                entry = self.config.add_server(server.ip, server.api_port, server.name)
+                self.config.add_server(server.ip, server.api_port, server.name)
                 self.config.first_launch = False
                 self.config.save()
                 self.root.after(0, lambda: self._show_done(server, client))
