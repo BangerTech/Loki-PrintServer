@@ -18,8 +18,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install socat
-        run: brew install socat
+      - name: Verify runner architecture
+        run: |
+          echo "Runner arch: $(uname -m)"
+          echo "Python arch: $(python3 -c 'import platform; print(platform.machine())')"
 
       - name: Build DMG
         run: bash client/build/build_mac.sh

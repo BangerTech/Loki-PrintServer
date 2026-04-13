@@ -23,6 +23,7 @@ cd "$CLIENT"
 echo "[1/5] Installing dependencies..."
 pip3 install --quiet pyinstaller pillow rumps zeroconf httpx websockets \
     customtkinter pystray packaging 2>&1 | grep -E "Successfully|already|ERROR" || true
+brew install create-dmg 2>/dev/null || true
 brew install socat 2>/dev/null || true
 
 # ── 2. Convert icon → .icns ────────────────────────────────────────────────────
@@ -37,83 +38,112 @@ iconutil -c icns "build/LokiClient.iconset" -o "build/LokiClient.icns" 2>/dev/nu
     || { echo "    iconutil failed, using PNG"; cp "assets/icon_512.png" "build/LokiClient.icns"; }
 rm -rf build/LokiClient.iconset
 
-# ── 3. Write Info.plist (LSUIElement = menu bar only, no dock icon) ────────────
-echo "[3/5] Writing Info.plist..."
-cat > build/Info.plist << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key>
-    <string>Loki-Client</string>
-    <key>CFBundleDisplayName</key>
-    <string>Loki-Client</string>
-    <key>CFBundleIdentifier</key>
-    <string>${BUNDLE_ID}</string>
-    <key>CFBundleVersion</key>
-    <string>${VERSION}</string>
-    <key>CFBundleShortVersionString</key>
-    <string>${VERSION}</string>
-    <key>CFBundleExecutable</key>
-    <string>Loki-Client</string>
-    <key>CFBundleIconFile</key>
-    <string>LokiClient</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
-</dict>
-</plist>
-EOF
+# ── 3. Generate PyInstaller .spec with custom Info.plist keys ─────────────────
+echo "[3/5] Generating spec file..."
+cat > build/LokiClient.spec << 'SPECEOF'
+# -*- mode: python ; coding: utf-8 -*-
+import os, sys
+
+block_cipher = None
+client_dir = os.path.abspath('.')
+
+a = Analysis(
+    ['tray_app.py'],
+    pathex=[client_dir],
+    binaries=[],
+    datas=[
+        ('core', 'core'),
+        ('assets', 'assets'),
+        ('onboarding.py', '.'),
+    ],
+    hiddenimports=[
+        'onboarding',
+        'core.api_client',
+        'core.config',
+        'core.device_db',
+        'core.discovery',
+        'core.usbip_attach',
+        'zeroconf._utils.ipaddress',
+        'zeroconf._handlers.answers',
+        'zeroconf._handlers.browser',
+        'zeroconf._handlers.record_manager',
+        'zeroconf._services.browser',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+)
+
+# Collect-all equivalents
+from PyInstaller.utils.hooks import collect_all
+for pkg in ['rumps', 'zeroconf', 'customtkinter']:
+    tmp_datas, tmp_binaries, tmp_hiddenimports = collect_all(pkg)
+    a.datas += tmp_datas
+    a.binaries += tmp_binaries
+    a.hiddenimports += tmp_hiddenimports
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='Loki-Client',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='Loki-Client',
+)
+
+app = BUNDLE(
+    coll,
+    name='Loki-Client.app',
+    icon='build/LokiClient.icns',
+    bundle_identifier='com.bangertech.loki-client',
+    info_plist={
+        'CFBundleName': 'Loki-Client',
+        'CFBundleDisplayName': 'Loki-Client',
+        'CFBundleVersion': '1.0.0',
+        'CFBundleShortVersionString': '1.0.0',
+        'NSHighResolutionCapable': True,
+        'LSUIElement': True,
+        'NSPrincipalClass': 'NSApplication',
+        'LSMinimumSystemVersion': '11.0',
+    },
+)
+SPECEOF
 
 # ── 4. PyInstaller ─────────────────────────────────────────────────────────────
 echo "[4/5] Building ${APPNAME}.app with PyInstaller..."
-rm -rf dist "${APPNAME}.spec"
+rm -rf dist build/Loki-Client
 
 pyinstaller \
-    --name "$APPNAME" \
-    --windowed \
-    --onedir \
     --noconfirm \
     --clean \
-    --osx-bundle-identifier "$BUNDLE_ID" \
-    --icon "build/LokiClient.icns" \
-    --add-data "core:core" \
-    --add-data "assets:assets" \
-    --add-data "onboarding.py:." \
-    --hidden-import "onboarding" \
-    --hidden-import "core.api_client" \
-    --hidden-import "core.config" \
-    --hidden-import "core.device_db" \
-    --hidden-import "core.discovery" \
-    --hidden-import "core.usbip_attach" \
-    --hidden-import "zeroconf._utils.ipaddress" \
-    --hidden-import "zeroconf._handlers.answers" \
-    --hidden-import "zeroconf._handlers.browser" \
-    --hidden-import "zeroconf._handlers.record_manager" \
-    --hidden-import "zeroconf._services.browser" \
-    --collect-all "rumps" \
-    --collect-all "zeroconf" \
-    --collect-all "customtkinter" \
-    --paths "." \
-    tray_app.py
+    --log-level INFO \
+    build/LokiClient.spec
 
-# Inject correct Info.plist (LSUIElement = true → no dock icon, lives in menu bar)
-echo "    Injecting Info.plist..."
-cp build/Info.plist "dist/${APPNAME}.app/Contents/Info.plist"
-
-# Make sure onboarding.py is importable inside the bundle
-INTERNAL="dist/${APPNAME}.app/Contents/MacOS"
-[ ! -f "${INTERNAL}/onboarding.py" ] && cp onboarding.py "${INTERNAL}/" 2>/dev/null || true
-INTERNAL2="dist/${APPNAME}/_internal"
-[ -d "$INTERNAL2" ] && [ ! -f "${INTERNAL2}/onboarding.py" ] && cp onboarding.py "${INTERNAL2}/" 2>/dev/null || true
-
-echo "    Ad-hoc code-signing ${APPNAME}.app..."
-codesign --force --deep --sign - "dist/${APPNAME}.app"
+echo "    Verifying binary architecture..."
+file "dist/${APPNAME}.app/Contents/MacOS/${APPNAME}"
 
 echo "    ${APPNAME}.app ready."
 
@@ -147,13 +177,14 @@ fi
 
 echo ""
 echo "=========================================="
-echo "  ✓ Build complete!"
+echo "  Build complete!"
 echo ""
 echo "  client/dist/${APPNAME}.dmg"
 echo ""
 echo "  Installation:"
-echo "  1. Öffne die .dmg"
-echo "  2. Ziehe Loki-Client in Applications"
-echo "  3. Rechtsklick → Öffnen (einmalig)"
-echo "  4. Loki erscheint oben in der Menüleiste"
+echo "  1. Open the .dmg"
+echo "  2. Drag Loki-Client to Applications"
+echo "  3. In Terminal: xattr -cr /Applications/Loki-Client.app"
+echo "  4. Right-click the app -> Open (first time only)"
+echo "  5. Loki appears in the menu bar"
 echo "=========================================="
