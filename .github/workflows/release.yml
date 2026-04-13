@@ -9,7 +9,7 @@ jobs:
   # ── macOS .dmg (Intel native; runs on Apple Silicon via Rosetta 2) ───────────
   build-mac:
     name: Build macOS .dmg
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 
