@@ -16,9 +16,8 @@
 
 ```bash
 git clone https://github.com/BangerTech/Loki-PrintServer.git
-cd Loki-PrintServer
-sudo bash server/scripts/setup-host.sh   # einmalig
-cd server && docker compose up -d
+cd Loki-PrintServer/server
+docker compose up -d
 ```
 
 ### Client installieren
@@ -70,7 +69,6 @@ Client (Mac/Win/Linux)
 | `api/forwarder.py` | Forwarding Manager (USB/IP, Serial, CUPS) + State-Persistenz |
 | `api/discovery.py` | mDNS Ankündigung (Zeroconf, Service: `_lokiprint._tcp.local.`) |
 | `scripts/start.sh` | Container-Start (Module, CUPS, avahi, uvicorn) |
-| `scripts/setup-host.sh` | Host-Vorbereitung (Kernel-Module, usbip tools) |
 | `web/index.html` | Web-Dashboard |
 | `web/icon_*.png` | Icons für Dashboard + Favicon |
 

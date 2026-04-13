@@ -28,23 +28,9 @@ Works with **Illustrator + xfcut**, Silhouette Studio, Inkcut, and any other sof
 
 > **Requires:** Raspberry Pi with Docker installed
 
-**1. Clone the repository**
-
 ```bash
 git clone https://github.com/BangerTech/Loki-PrintServer.git
-cd Loki-PrintServer
-```
-
-**2. Prepare the host (one time only)**
-
-```bash
-sudo bash server/scripts/setup-host.sh
-```
-
-**3. Start the server**
-
-```bash
-cd server
+cd Loki-PrintServer/server
 docker compose up -d
 ```
 
@@ -60,8 +46,9 @@ Download the latest client for your platform from **[GitHub Releases](https://gi
 
 | Platform | File | Installation |
 |----------|------|--------------|
-| **macOS** | `Loki-Client.dmg` | Open → drag to Applications |
-| **Windows** | `Loki-Client-Setup.exe` | Run installer |
+| **macOS (Apple Silicon)** | `Loki-Client-arm64.dmg` | Open → drag to Applications |
+| **macOS (Intel)** | `Loki-Client-x86_64.dmg` | Open → drag to Applications |
+| **Windows** | `LokiClient.exe` | Run installer |
 | **Linux** | `Loki-Client-linux` | `chmod +x` + run |
 
 ### First Launch
