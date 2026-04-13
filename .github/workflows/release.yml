@@ -6,9 +6,9 @@ on:
       - "v*.*.*"
 
 jobs:
-  # ── macOS .dmg (Apple Silicon) ──────────────────────────────────────────────
-  build-mac-arm:
-    name: Build macOS .dmg (Apple Silicon)
+  # ── macOS .dmg (Universal: Apple Silicon + Intel via universal2) ─────────────
+  build-mac:
+    name: Build macOS .dmg (Universal)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,44 +21,14 @@ jobs:
       - name: Install socat
         run: brew install socat
 
-      - name: Build DMG
+      - name: Build DMG (universal2)
         run: bash client/build/build_mac.sh
-
-      - name: Rename DMG
-        run: mv client/dist/Loki-Client.dmg client/dist/Loki-Client-arm64.dmg
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: Loki-Client-mac-arm64
-          path: client/dist/Loki-Client-arm64.dmg
-
-  # ── macOS .dmg (Intel) ──────────────────────────────────────────────────────
-  build-mac-intel:
-    name: Build macOS .dmg (Intel)
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install socat
-        run: brew install socat
-
-      - name: Build DMG
-        run: bash client/build/build_mac.sh
-
-      - name: Rename DMG
-        run: mv client/dist/Loki-Client.dmg client/dist/Loki-Client-x86_64.dmg
-
-      - name: Upload DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: Loki-Client-mac-x86_64
-          path: client/dist/Loki-Client-x86_64.dmg
+          name: Loki-Client-mac
+          path: client/dist/Loki-Client.dmg
 
   # ── Windows .exe ────────────────────────────────────────────────────────────
   build-windows:
@@ -138,7 +108,7 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-mac-arm, build-mac-intel, build-windows, build-linux]
+    needs: [build-mac, build-windows, build-linux]
     permissions:
       contents: write
     steps:
@@ -174,15 +144,13 @@ jobs:
 
             | Platform | File |
             |----------|------|
-            | macOS (Apple Silicon M1/M2/M3) | `Loki-Client-arm64.dmg` |
-            | macOS (Intel) | `Loki-Client-x86_64.dmg` |
+            | macOS (Apple Silicon + Intel) | `Loki-Client.dmg` |
             | Windows | `LokiClient.exe` |
             | Linux | `Loki-Client-linux` |
 
             > macOS: First launch → right-click → Open
           files: |
-            release-assets/Loki-Client-mac-arm64/Loki-Client-arm64.dmg
-            release-assets/Loki-Client-mac-x86_64/Loki-Client-x86_64.dmg
+            release-assets/Loki-Client-mac/Loki-Client.dmg
             release-assets/Loki-Client-windows/LokiClient-Setup.exe
             release-assets/Loki-Client-windows/LokiClient.exe
             release-assets/Loki-Client-linux/Loki-Client-linux

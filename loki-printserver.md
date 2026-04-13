@@ -24,7 +24,7 @@ docker compose up -d
 
 Unter **https://github.com/BangerTech/Loki-PrintServer/releases** die neueste Version herunterladen:
 
-- **macOS:** `Loki-Client.dmg` → in Applications ziehen
+- **macOS (Apple Silicon + Intel):** `Loki-Client.dmg` → in Applications ziehen
 - **Windows:** `Loki-Client-Setup.exe` → Installer ausführen
 - **Linux:** `Loki-Client-linux` → ausführbar machen und starten
 

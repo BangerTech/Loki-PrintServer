@@ -80,6 +80,7 @@ pyinstaller \
     --onedir \
     --noconfirm \
     --clean \
+    --target-arch universal2 \
     --osx-bundle-identifier "$BUNDLE_ID" \
     --icon "build/LokiClient.icns" \
     --add-data "core:core" \

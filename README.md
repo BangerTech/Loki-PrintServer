@@ -46,8 +46,7 @@ Download the latest client for your platform from **[GitHub Releases](https://gi
 
 | Platform | File | Installation |
 |----------|------|--------------|
-| **macOS (Apple Silicon)** | `Loki-Client-arm64.dmg` | Open → drag to Applications |
-| **macOS (Intel)** | `Loki-Client-x86_64.dmg` | Open → drag to Applications |
+| **macOS (Apple Silicon + Intel)** | `Loki-Client.dmg` | Open → drag to Applications |
 | **Windows** | `LokiClient.exe` | Run installer |
 | **Linux** | `Loki-Client-linux` | `chmod +x` + run |
 
