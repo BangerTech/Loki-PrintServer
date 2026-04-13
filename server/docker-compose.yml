@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  loki-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: loki-printserver
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - /sys/bus/usb:/sys/bus/usb:ro
+      - /lib/modules:/lib/modules:ro
+      - loki-config:/etc/loki-printserver
+    environment:
+      - LOKI_PORT=${LOKI_PORT:-7575}
+      - LOKI_API_PORT=${LOKI_API_PORT:-7576}
+      - LOKI_SECRET=${LOKI_SECRET:-}
+      - LOKI_ALLOW_ALL=${LOKI_ALLOW_ALL:-true}
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    cap_add:
+      - SYS_MODULE
+      - NET_ADMIN
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${LOKI_API_PORT:-7576}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "com.loki-printserver.version=1.0.0"
+      - "com.loki-printserver.description=Loki USB over IP Server"
+
+volumes:
+  loki-config:
+    driver: local
