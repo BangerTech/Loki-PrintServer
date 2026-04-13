@@ -6,10 +6,10 @@ on:
       - "v*.*.*"
 
 jobs:
-  # ── macOS .dmg (Universal: Apple Silicon + Intel via universal2) ─────────────
+  # ── macOS .dmg (Intel native; runs on Apple Silicon via Rosetta 2) ───────────
   build-mac:
-    name: Build macOS .dmg (Universal)
-    runs-on: macos-latest
+    name: Build macOS .dmg
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
 
@@ -21,7 +21,7 @@ jobs:
       - name: Install socat
         run: brew install socat
 
-      - name: Build DMG (universal2)
+      - name: Build DMG
         run: bash client/build/build_mac.sh
 
       - name: Upload DMG
@@ -144,8 +144,8 @@ jobs:
 
             | Platform | File |
             |----------|------|
-            | macOS (Apple Silicon + Intel) | `Loki-Client.dmg` |
-            | Windows | `LokiClient.exe` |
+            | macOS (Intel + Apple Silicon via Rosetta 2) | `Loki-Client.dmg` |
+            | Windows | `LokiClient-Setup.exe` |
             | Linux | `Loki-Client-linux` |
 
             > macOS: First launch → right-click → Open
