@@ -69,6 +69,26 @@ USB_SPEED_NAMES = {
     5: "SuperSpeed+ (10 Gbps)",
 }
 
+# Vendor IDs that are always USB infrastructure (never shareable peripherals)
+INFRA_VENDORS = {
+    "1d6b",  # Linux Foundation (root hubs)
+    "0000",  # unassigned / placeholder
+}
+
+def _is_infrastructure(dev) -> bool:
+    """Return True for USB hubs, root controllers and other non-shareable devices."""
+    vid = f"{dev.idVendor:04x}"
+    # Hub class
+    if dev.bDeviceClass == 0x09:
+        return True
+    # Linux root hubs / unassigned VIDs
+    if vid in INFRA_VENDORS:
+        return True
+    # VID:PID 0000:0000 = placeholder
+    if dev.idVendor == 0 and dev.idProduct == 0:
+        return True
+    return False
+
 
 def _run(cmd: list[str], check=True) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, check=check)
@@ -173,6 +193,7 @@ class USBIPManager:
                 device_class=device_class,
                 speed=speed,
                 is_shared=bus_id in shared,
+                is_infrastructure=_is_infrastructure(dev),
             ))
 
         return devices

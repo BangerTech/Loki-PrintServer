@@ -2,6 +2,7 @@
 Loki-PrintServer - USB over IP Server
 Main FastAPI application
 """
+import asyncio
 import logging
 import os
 import time
@@ -34,6 +35,55 @@ forwarder = ForwardingManager()
 connected_clients: list[WebSocket] = []
 
 
+async def _auto_restore_devices():
+    """Re-share devices that were shared before the last restart."""
+    saved = forwarder.load_saved_devices()
+    if not saved:
+        return
+
+    # Give USB subsystem a moment to settle after container start
+    await asyncio.sleep(2)
+    current = await usbip_manager.list_devices()
+    current_ids = {d.bus_id for d in current}
+
+    for entry in saved:
+        if entry.bus_id not in current_ids:
+            logger.info(f"Auto-restore: device {entry.bus_id} not present yet, skipping")
+            continue
+        logger.info(f"Auto-restore: re-sharing {entry.bus_id} ({entry.product_name})")
+        try:
+            await forwarder.share_device(
+                bus_id=entry.bus_id,
+                device_class=entry.device_class,
+                vendor_id=entry.vendor_id,
+                product_id=entry.product_id,
+                product_name=entry.product_name,
+                auto_share=entry.auto_share,
+            )
+        except Exception as e:
+            logger.warning(f"Auto-restore failed for {entry.bus_id}: {e}")
+
+
+async def _auto_share_all():
+    """Share every detected USB device (AUTO_SHARE_ALL=true mode)."""
+    await asyncio.sleep(2)
+    devices = await usbip_manager.list_devices()
+    for dev in devices:
+        if not forwarder.get_state(dev.bus_id):
+            logger.info(f"AUTO_SHARE_ALL: sharing {dev.bus_id} ({dev.product})")
+            try:
+                await forwarder.share_device(
+                    bus_id=dev.bus_id,
+                    device_class=dev.device_class or "",
+                    vendor_id=dev.vendor_id,
+                    product_id=dev.product_id,
+                    product_name=dev.product or f"Loki-{dev.bus_id}",
+                    auto_share=True,
+                )
+            except Exception as e:
+                logger.warning(f"AUTO_SHARE_ALL failed for {dev.bus_id}: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Loki-PrintServer...")
@@ -42,6 +92,13 @@ async def lifespan(app: FastAPI):
         service_name="LokiPrint",
         port=int(os.getenv("LOKI_PORT", 7575)),
     )
+
+    # Auto-share on startup
+    if os.getenv("AUTO_SHARE_ALL", "false").lower() == "true":
+        asyncio.create_task(_auto_share_all())
+    else:
+        asyncio.create_task(_auto_restore_devices())
+
     yield
     logger.info("Shutting down Loki-PrintServer...")
     # Unshare all devices on shutdown
@@ -155,6 +212,16 @@ async def unshare_device(req: UnshareRequest):
         return {"success": True, "message": f"Device {req.bus_id} is no longer shared"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/devices/{bus_id}/auto-share")
+async def toggle_auto_share(bus_id: str, enabled: bool = True):
+    """Toggle auto-share (persist across restarts) for a device."""
+    state = forwarder.get_state(bus_id)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Device {bus_id} is not currently shared")
+    forwarder.mark_auto_share(bus_id, enabled)
+    return {"success": True, "bus_id": bus_id, "auto_share": enabled}
 
 
 @app.get("/api/devices/{bus_id}/forward")

@@ -90,10 +90,26 @@
       background: transparent; color: var(--muted); cursor: pointer; font-size: 0.8rem;
     }
     .refresh-btn:hover { border-color: var(--accent); color: var(--accent2); }
+    .device-card.infra {
+      opacity: 0.45;
+      border-style: dashed;
+    }
+    .device-card.infra:hover { opacity: 0.65; border-color: var(--border); }
+    .infra-header {
+      font-size: 0.78rem; color: var(--muted); text-transform: uppercase;
+      letter-spacing: 1px; margin: 20px 0 8px; display: flex; align-items: center; gap: 8px;
+    }
+    .infra-header::before { content: ''; flex: 1; height: 1px; background: var(--border); }
+    details > summary { cursor: pointer; list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
     footer { text-align: center; color: var(--muted); font-size: 0.8rem; padding: 24px; border-top: 1px solid var(--border); }
     footer a { color: var(--accent2); text-decoration: none; }
     .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px; background: var(--card); border: 1px solid var(--success); color: var(--success); font-size: 0.85rem; transform: translateY(100px); opacity: 0; transition: all 0.3s; z-index: 100; }
     .toast.show { transform: translateY(0); opacity: 1; }
+    .auto-share-toggle { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: var(--muted); cursor: pointer; white-space: nowrap; }
+    .auto-share-toggle input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+    .auto-share-toggle.active { color: var(--accent); }
+    .device-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -138,6 +154,12 @@
       <div class="device-list" id="deviceList">
         <div class="empty">Loading devices...</div>
       </div>
+      <details id="infraSection" style="display:none;margin-top:8px;">
+        <summary>
+          <div class="infra-header">▸ USB Infrastructure (Hubs &amp; Controllers)</div>
+        </summary>
+        <div class="device-list" id="infraList"></div>
+      </details>
     </section>
   </main>
 
@@ -177,39 +199,63 @@
       }
     }
 
+    function renderDevice(d, isInfra = false) {
+      const icon = DEVICE_ICONS[d.device_class] || (isInfra ? '🔗' : '🔌');
+      const name = d.product || `Device ${d.vendor_id}:${d.product_id}`;
+      const mfr = d.manufacturer ? `${d.manufacturer} · ` : '';
+      const fi = d.forward_info || {};
+      const autoShare = fi.auto_share || false;
+      const badge = d.is_shared
+        ? `<span class="badge badge-shared">● Shared</span>`
+        : `<span class="badge badge-idle">${isInfra ? 'Infrastructure' : 'Idle'}</span>`;
+      const actions = isInfra ? '' : (d.is_shared
+        ? `<div class="device-actions">
+            <label class="auto-share-toggle ${autoShare ? 'active' : ''}" title="Re-share automatically after server restart">
+              <input type="checkbox" ${autoShare ? 'checked' : ''} onchange="toggleAutoShare('${d.bus_id}', this.checked)">
+              Auto-Share
+            </label>
+            <button class="btn btn-unshare" onclick="unshareDevice('${d.bus_id}')">Stop Sharing</button>
+           </div>`
+        : `<div class="device-actions">
+            <button class="btn btn-share" onclick="shareDevice('${d.bus_id}')">Share</button>
+           </div>`);
+      return `
+        <div class="device-card${isInfra ? ' infra' : ''}">
+          <div class="device-icon">${icon}</div>
+          <div class="device-info">
+            <div class="device-name">${name}</div>
+            <div class="device-meta">${mfr}${d.vendor_id}:${d.product_id} · Bus ${d.bus_id} · ${d.device_class || 'Unknown'}</div>
+          </div>
+          ${badge}
+          ${actions}
+        </div>`;
+    }
+
     async function loadDevices() {
       const list = document.getElementById('deviceList');
+      const infraList = document.getElementById('infraList');
+      const infraSection = document.getElementById('infraSection');
       try {
         const r = await fetch(`${API}/api/devices`);
         const devices = await r.json();
-        document.getElementById('statDevices').textContent = devices.length;
 
-        if (devices.length === 0) {
+        const peripherals = devices.filter(d => !d.is_infrastructure);
+        const infra = devices.filter(d => d.is_infrastructure);
+
+        document.getElementById('statDevices').textContent = peripherals.length;
+
+        if (peripherals.length === 0) {
           list.innerHTML = '<div class="empty">No USB devices detected</div>';
-          return;
+        } else {
+          list.innerHTML = peripherals.map(d => renderDevice(d, false)).join('');
         }
 
-        list.innerHTML = devices.map(d => {
-          const icon = DEVICE_ICONS[d.device_class] || '🔌';
-          const name = d.product || `Device ${d.vendor_id}:${d.product_id}`;
-          const mfr = d.manufacturer ? `${d.manufacturer} · ` : '';
-          const badge = d.is_shared
-            ? `<span class="badge badge-shared">● Shared</span>`
-            : `<span class="badge badge-idle">Idle</span>`;
-          const btn = d.is_shared
-            ? `<button class="btn btn-unshare" onclick="unshareDevice('${d.bus_id}')">Stop Sharing</button>`
-            : `<button class="btn btn-share" onclick="shareDevice('${d.bus_id}')">Share</button>`;
-          return `
-            <div class="device-card">
-              <div class="device-icon">${icon}</div>
-              <div class="device-info">
-                <div class="device-name">${name}</div>
-                <div class="device-meta">${mfr}${d.vendor_id}:${d.product_id} · Bus ${d.bus_id} · ${d.device_class || 'Unknown'}</div>
-              </div>
-              ${badge}
-              ${btn}
-            </div>`;
-        }).join('');
+        if (infra.length > 0) {
+          infraSection.style.display = '';
+          infraList.innerHTML = infra.map(d => renderDevice(d, true)).join('');
+        } else {
+          infraSection.style.display = 'none';
+        }
       } catch(e) {
         list.innerHTML = '<div class="empty">Failed to load devices</div>';
       }
@@ -227,6 +273,16 @@
         setTimeout(loadDevices, 500);
       } catch(e) {
         showToast('Failed to share device', false);
+      }
+    }
+
+    async function toggleAutoShare(busId, enabled) {
+      try {
+        await fetch(`${API}/api/devices/${busId}/auto-share?enabled=${enabled}`, { method: 'POST' });
+        showToast(enabled ? '⏰ Auto-Share enabled — device will be shared on restart' : 'Auto-Share disabled');
+        setTimeout(loadDevices, 300);
+      } catch(e) {
+        showToast('Failed to update Auto-Share', false);
       }
     }
 

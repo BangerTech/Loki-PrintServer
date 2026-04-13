@@ -10,17 +10,23 @@ Each shared device gets forwarding enabled for ALL applicable methods,
 so every client platform can connect using its best available method.
 """
 import asyncio
+import json
 import logging
+import os
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("loki-printserver.forwarder")
 
 # TCP port range for serial forwarding (one port per device)
 SERIAL_PORT_BASE = 7580
+
+# Persistent state file — survives container restarts (stored in named volume)
+STATE_FILE = Path(os.getenv("LOKI_DATA_DIR", "/etc/loki-printserver")) / "shared_devices.json"
 
 
 @dataclass
@@ -32,6 +38,23 @@ class ForwardState:
     serial_dev: Optional[str] = None  # e.g. /dev/ttyUSB0
     ipp_shared: bool = False
     cups_name: Optional[str] = None
+    # Metadata saved for auto-restore
+    device_class: str = ""
+    vendor_id: str = ""
+    product_id: str = ""
+    product_name: str = ""
+    auto_share: bool = False  # user explicitly set this device to auto-share
+
+
+@dataclass
+class _SavedDevice:
+    """Lightweight snapshot persisted to disk (no live processes)."""
+    bus_id: str
+    device_class: str = ""
+    vendor_id: str = ""
+    product_id: str = ""
+    product_name: str = ""
+    auto_share: bool = False
 
 
 class ForwardingManager:
@@ -41,12 +64,57 @@ class ForwardingManager:
         self._states: dict[str, ForwardState] = {}
         self._next_serial_port = SERIAL_PORT_BASE
 
+    # ── Persistence ────────────────────────────────────────────────────────────
+
+    def save_state(self):
+        """Persist the list of shared devices to disk."""
+        try:
+            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            data = [
+                asdict(_SavedDevice(
+                    bus_id=s.bus_id,
+                    device_class=s.device_class,
+                    vendor_id=s.vendor_id,
+                    product_id=s.product_id,
+                    product_name=s.product_name,
+                    auto_share=s.auto_share,
+                ))
+                for s in self._states.values()
+            ]
+            STATE_FILE.write_text(json.dumps(data, indent=2))
+        except Exception as e:
+            logger.error(f"Could not save shared-device state: {e}")
+
+    def load_saved_devices(self) -> list[_SavedDevice]:
+        """Load previously shared devices from disk."""
+        try:
+            if STATE_FILE.exists():
+                raw = json.loads(STATE_FILE.read_text())
+                return [_SavedDevice(**d) for d in raw]
+        except Exception as e:
+            logger.warning(f"Could not load saved shared-device state: {e}")
+        return []
+
+    def mark_auto_share(self, bus_id: str, enabled: bool):
+        """Toggle the auto-share flag for a device and persist."""
+        state = self._states.get(bus_id)
+        if state:
+            state.auto_share = enabled
+            self.save_state()
+
     async def share_device(self, bus_id: str, device_class: str,
                            serial_dev: Optional[str] = None,
                            vendor_id: str = "", product_id: str = "",
-                           product_name: str = ""):
+                           product_name: str = "",
+                           auto_share: bool = False):
         """Enable all applicable forwarding for a device."""
         state = self._states.setdefault(bus_id, ForwardState(bus_id=bus_id))
+        state.device_class = device_class
+        state.vendor_id = vendor_id
+        state.product_id = product_id
+        state.product_name = product_name
+        if auto_share:
+            state.auto_share = True
 
         # 1) USB/IP — always try (works for Linux/Windows clients)
         await self._share_usbip(state, bus_id)
@@ -60,6 +128,7 @@ class ForwardingManager:
         if "Printer" in device_class or self._is_printer_class(vendor_id, product_id):
             await self._share_cups(state, bus_id, product_name or f"Loki-{bus_id}")
 
+        self.save_state()
         return state
 
     async def unshare_device(self, bus_id: str):
@@ -78,6 +147,7 @@ class ForwardingManager:
             await self._unshare_cups(state)
 
         del self._states[bus_id]
+        self.save_state()
 
     def get_state(self, bus_id: str) -> Optional[ForwardState]:
         return self._states.get(bus_id)
@@ -92,6 +162,7 @@ class ForwardingManager:
             return {"shared": False}
         return {
             "shared": True,
+            "auto_share": state.auto_share,
             "usbip": state.usbip_shared,
             "serial": {
                 "available": state.serial_port is not None,

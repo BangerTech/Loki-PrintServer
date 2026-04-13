@@ -19,6 +19,9 @@ services:
       - LOKI_API_PORT=${LOKI_API_PORT:-7576}
       - LOKI_SECRET=${LOKI_SECRET:-}
       - LOKI_ALLOW_ALL=${LOKI_ALLOW_ALL:-true}
+      # Set AUTO_SHARE_ALL=true to share every USB device automatically on startup
+      # (no manual "Share" click needed). Default: false (remembers previous selections)
+      - AUTO_SHARE_ALL=${AUTO_SHARE_ALL:-false}
     devices:
       - /dev/bus/usb:/dev/bus/usb
     cap_add:
