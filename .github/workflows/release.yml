@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  # ── macOS .dmg ──────────────────────────────────────────────────────────────
+  build-mac:
+    name: Build macOS .dmg
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install socat
+        run: brew install socat
+
+      - name: Build DMG
+        run: bash client/build/build_mac.sh
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Loki-Client-mac
+          path: client/dist/Loki-Client.dmg
+
+  # ── Windows .exe ────────────────────────────────────────────────────────────
+  build-windows:
+    name: Build Windows .exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build EXE
+        run: client\build\build_windows.bat
+        shell: cmd
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Loki-Client-windows
+          path: client/dist/LokiClient.exe
+
+  # ── Linux binary ─────────────────────────────────────────────────────────────
+  build-linux:
+    name: Build Linux binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get install -y python3-tk
+          pip install pyinstaller pillow pystray zeroconf httpx websockets customtkinter packaging
+
+      - name: Build
+        run: |
+          cd client
+          pyinstaller \
+            --name "Loki-Client-linux" \
+            --onefile \
+            --add-data "core:core" \
+            --add-data "assets:assets" \
+            --add-data "onboarding.py:." \
+            --hidden-import "onboarding" \
+            --hidden-import "core.api_client" \
+            --hidden-import "core.config" \
+            --hidden-import "core.device_db" \
+            --hidden-import "core.discovery" \
+            --hidden-import "core.usbip_attach" \
+            --hidden-import "zeroconf._utils.ipaddress" \
+            --hidden-import "zeroconf._handlers.answers" \
+            --collect-all "zeroconf" \
+            --collect-all "customtkinter" \
+            tray_app.py
+
+      - name: Upload Linux binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: Loki-Client-linux
+          path: client/dist/Loki-Client-linux
+
+  # ── GitHub Release ───────────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-mac, build-windows, build-linux]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Loki-Client ${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## Loki-PrintServer ${{ steps.version.outputs.VERSION }}
+            by BangerTECH
+
+            ### Installation
+
+            **Server (Raspberry Pi):**
+            ```bash
+            git clone https://github.com/BangerTech/Loki-PrintServer.git
+            cd Loki-PrintServer
+            sudo bash server/scripts/setup-host.sh
+            cd server && docker compose up -d
+            ```
+
+            **Client:** Download below for your platform.
+
+            | Platform | File |
+            |----------|------|
+            | macOS | `Loki-Client.dmg` |
+            | Windows | `LokiClient.exe` |
+            | Linux | `Loki-Client-linux` |
+
+            > macOS: First launch → right-click → Open
+          files: |
+            release-assets/Loki-Client-mac/Loki-Client.dmg
+            release-assets/Loki-Client-windows/LokiClient.exe
+            release-assets/Loki-Client-linux/Loki-Client-linux
+          draft: false
+          prerelease: false

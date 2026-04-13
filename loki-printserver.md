@@ -1,206 +1,223 @@
 # Loki-PrintServer — Projektdokumentation
 
-## Projektübersicht
+## Übersicht
 
-**Loki-PrintServer** ist ein Open-Source USB-over-IP-System, das es ermöglicht, USB-Geräte (Schneideplotter, Drucker, Scanner) von einem Raspberry Pi über das Netzwerk an Windows-, macOS- und Linux-Rechner weiterzuleiten.
+**Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
-Das Gerät erscheint auf dem Client-Rechner als lokal angeschlossenes USB-Gerät.
+**GitHub:** https://github.com/BangerTech/Loki-PrintServer  
+**Version:** 1.0.0  
+**Lizenz:** MIT — © BangerTECH
+
+---
+
+## Für den Endnutzer
+
+### Server starten (Raspberry Pi)
+
+```bash
+git clone https://github.com/BangerTech/Loki-PrintServer.git
+cd Loki-PrintServer
+sudo bash server/scripts/setup-host.sh   # einmalig
+cd server && docker compose up -d
+```
+
+### Client installieren
+
+Unter **https://github.com/BangerTech/Loki-PrintServer/releases** die neueste Version herunterladen:
+
+- **macOS:** `Loki-Client.dmg` → in Applications ziehen
+- **Windows:** `Loki-Client-Setup.exe` → Installer ausführen
+- **Linux:** `Loki-Client-linux` → ausführbar machen und starten
 
 ---
 
 ## Architektur
 
 ```
-┌───────────────────────────────────────┐
-│         Raspberry Pi (Server)          │
-│                                        │
-│  ┌────────────┐  ┌──────────────────┐  │
-│  │ USB-Gerät  │  │   Docker         │  │
-│  │ (Plotter)  │  │  ┌────────────┐  │  │
-│  └─────┬──────┘  │  │  usbipd    │  │  │
-│        │         │  │  :7575     │  │  │
-│        └─────────►  ├────────────┤  │  │
-│                  │  │ FastAPI    │  │  │
-│                  │  │  :7576     │  │  │
-│                  │  ├────────────┤  │  │
-│                  │  │ Web UI     │  │  │
-│                  │  └────────────┘  │  │
-│                  └──────────────────┘  │
-└───────────────────────────────────────┘
-              │ TCP/IP
-              ▼
-┌───────────────────────────────────────┐
-│         Client-Rechner                 │
-│                                        │
-│  ┌────────────────────────────────┐   │
-│  │     Loki-Client GUI            │   │
-│  │  (Python + tkinter/customtkinter│   │
-│  └─────────────┬──────────────────┘   │
-│                │                       │
-│         usbip attach                  │
-│                │                       │
-│         /dev/ttyUSB0                  │
-│         oder COM3                     │
-│         (Gerät erscheint lokal!)      │
-└───────────────────────────────────────┘
+Raspberry Pi
+  ├── Docker Container: loki-printserver
+  │     ├── FastAPI API          Port 7576  (REST + WebSocket)
+  │     ├── Web Dashboard        Port 7576  (/)
+  │     ├── usbipd               Port 7575  (USB/IP Protokoll)
+  │     ├── socat                Port 7580+ (Serial-over-TCP)
+  │     └── CUPS                 Port 631   (IPP Netzwerkdrucker)
+  └── Kernel Module: usbip_core, usbip_host
+
+Client (Mac/Win/Linux)
+  ├── rumps (macOS Menüleiste) / pystray (Windows/Linux Tray)
+  ├── Onboarding Wizard (customtkinter)
+  ├── mDNS Discovery (zeroconf) → findet Server automatisch
+  ├── Multi-Server Support (JSON config in ~/.config/loki-printserver/)
+  └── Attach-Methoden:
+        ├── USB/IP    → Linux (nativ), Windows (usbip-win)
+        ├── Serial    → socat → virtueller /dev/tty.loki-* oder COM-Port
+        └── IPP       → CUPS lpadmin → Netzwerkdrucker
 ```
 
 ---
 
-## Komponenten
+## Dateien
 
-### Server (`/server/`)
+### Server (`server/`)
 
 | Datei | Beschreibung |
 |-------|-------------|
 | `docker-compose.yml` | Docker Compose Konfiguration |
-| `Dockerfile` | Container-Image (Python 3.12 + usbip tools) |
-| `api/main.py` | FastAPI Hauptanwendung, REST-Endpunkte, WebSocket |
+| `Dockerfile` | Container-Image |
+| `api/main.py` | FastAPI Hauptapp, alle Endpunkte |
 | `api/models.py` | Pydantic Datenmodelle |
-| `api/usbip.py` | USB/IP Gerätemanager (usbipd wrapper) |
-| `api/discovery.py` | mDNS/Bonjour Server-Ankündigung (Zeroconf) |
-| `scripts/start.sh` | Container-Startskript |
-| `scripts/setup-host.sh` | Einmalige Host-Vorbereitung (Kernel-Module) |
-| `web/index.html` | Web-Dashboard (HTML/CSS/JS) |
+| `api/usbip.py` | USB-Geräteerkennung (pyusb) + usbipd |
+| `api/forwarder.py` | Forwarding Manager (USB/IP, Serial, CUPS) |
+| `api/discovery.py` | mDNS Ankündigung (Zeroconf) |
+| `scripts/start.sh` | Container-Start (Module, CUPS, avahi, uvicorn) |
+| `scripts/setup-host.sh` | Host-Vorbereitung (Kernel-Module, usbip tools) |
+| `web/index.html` | Web-Dashboard |
+| `web/icon_*.png` | Icons für Dashboard + Favicon |
 
-### Client (`/client/`)
+### Client (`client/`)
 
 | Datei | Beschreibung |
 |-------|-------------|
-| `loki_client.py` | Haupt-GUI-Anwendung (tkinter/customtkinter) |
+| `tray_app.py` | Haupt-App: macOS Menu Bar (rumps) + Tray (pystray) |
+| `onboarding.py` | Onboarding-Wizard (Schritt 1-4, customtkinter) |
 | `core/api_client.py` | HTTP-Client für Server-API |
+| `core/config.py` | Server-Liste persistieren (~/.config/loki-printserver/) |
+| `core/device_db.py` | USB-ID Datenbank (CH340, Plotter, Drucker, etc.) |
 | `core/discovery.py` | mDNS-Serversuche (Zeroconf) |
-| `core/usbip_attach.py` | Platform-spezifischer USB/IP-Attach (Linux/Win/Mac) |
-| `linux/install.sh` | Linux-Installer |
-| `windows/install.ps1` | Windows-Installer (PowerShell) |
-| `mac/install.sh` | macOS-Installer |
+| `core/usbip_attach.py` | Plattform-Attach: USB/IP + Serial + IPP |
+| `assets/` | Logo + Icons in allen Größen |
+| `build/build_mac.sh` | macOS .app + .dmg Builder (PyInstaller + iconutil) |
+| `build/build_windows.bat` | Windows .exe Builder (PyInstaller) |
+| `build/installer.iss` | Windows Installer (Inno Setup) |
 
 ---
 
 ## API-Endpunkte
 
-### REST API (Port 7576)
-
 | Method | Endpoint | Beschreibung |
 |--------|----------|-------------|
 | GET | `/health` | Health-Check |
-| GET | `/api/status` | Server-Status (CPU, RAM, etc.) |
-| GET | `/api/devices` | Alle USB-Geräte auflisten |
+| GET | `/api/status` | CPU, RAM, Uptime, shared count |
+| GET | `/api/devices` | Alle USB-Geräte mit forward_info |
 | GET | `/api/devices/shared` | Nur freigegebene Geräte |
-| POST | `/api/devices/share` | Gerät freigeben |
+| POST | `/api/devices/share` | Gerät freigeben (USB/IP + Serial + CUPS) |
 | POST | `/api/devices/unshare` | Freigabe beenden |
-| GET | `/api/clients` | Verbundene Clients |
+| GET | `/api/devices/{bus_id}/forward` | Forwarding-Details eines Geräts |
 | GET | `/api/config` | Server-Konfiguration |
-| GET | `/` | Web-Dashboard |
+| WS | `/ws` | Echtzeit-Updates (device_shared, device_unshared) |
 
-### WebSocket
+### Forwarding Info (Response von `/api/devices/share`)
 
-| Endpoint | Beschreibung |
-|----------|-------------|
-| `ws://<host>:7576/ws` | Echtzeit-Updates (device_shared, device_unshared) |
+```json
+{
+  "success": true,
+  "bus_id": "1-3",
+  "forward_info": {
+    "shared": true,
+    "usbip": true,
+    "serial": {
+      "available": true,
+      "port": 7580,
+      "device": "/dev/ttyUSB0"
+    },
+    "ipp": {
+      "available": false,
+      "cups_name": null
+    }
+  }
+}
+```
 
-### Ports
+---
+
+## Ports
 
 | Port | Protokoll | Beschreibung |
 |------|-----------|-------------|
 | 7575 | TCP | USB/IP Protokoll (usbipd) |
-| 7576 | HTTP/WS | Management API + Web UI |
+| 7576 | HTTP/WS | Management API + Web Dashboard |
+| 7580+ | TCP | Serial-over-TCP (je Gerät ein Port) |
+| 631 | HTTP | CUPS / IPP Netzwerkdrucker |
 
 ---
 
-## Konfiguration (Umgebungsvariablen)
+## Konfiguration (server/.env)
 
 | Variable | Standard | Beschreibung |
 |----------|---------|-------------|
-| `LOKI_PORT` | `7575` | USB/IP Protokollport |
-| `LOKI_API_PORT` | `7576` | API & Web UI Port |
-| `LOKI_SECRET` | leer | Optionales Passwort für API-Zugriff |
+| `LOKI_PORT` | `7575` | USB/IP Port |
+| `LOKI_API_PORT` | `7576` | API + Dashboard Port |
+| `LOKI_SECRET` | leer | Optionales API-Passwort |
 | `LOKI_ALLOW_ALL` | `true` | Alle Geräte freigebar |
 
 ---
 
 ## Kernel-Module
 
-Der Server benötigt diese Linux-Kernel-Module:
-
 | Modul | Seite | Beschreibung |
 |-------|-------|-------------|
-| `usbip_core` | Server | USB/IP Basismodul |
-| `usbip_host` | Server | USB/IP Host-Treiber (Geräte exportieren) |
-| `vhci_hcd` | Client | USB/IP Client-Treiber (Geräte importieren) |
+| `usbip_core` | Server | USB/IP Basis |
+| `usbip_host` | Server | Geräte exportieren |
+| `vhci_hcd` | Linux-Client | Geräte importieren |
 
 ---
 
-## Plattform-Unterstützung
+## Forwarding-Methoden je Plattform
 
-### Linux (Server & Client)
-- Volle native USB/IP-Unterstützung über Kernel-Module
-- Automatische mDNS-Erkennung
-- Installer für Debian/Ubuntu/Raspberry Pi OS
-
-### Windows (Client)
-- Benötigt [usbip-win](https://github.com/cezanne/usbip-win/releases) Driver
-- PowerShell Installer
-- Gerät erscheint als COM-Port oder USB-Gerät
-
-### macOS (Client)
-- macOS hat keinen nativen USB/IP Kernel-Support
-- Option 1: Lima VM (`brew install lima`) — empfohlen
-- Option 2: Serial-Forwarding für Plotter (via TCP-zu-seriell)
-- Option 3: Manuelle Linux-VM (UTM, Parallels, VMware)
+| Methode | macOS | Windows | Linux |
+|---------|-------|---------|-------|
+| USB/IP | Lima VM (optional) | usbip-win | nativ |
+| Serial (socat) | ✅ `/dev/tty.loki-*` | com0com / TCP | ✅ `/dev/ttyLOKI*` |
+| IPP/CUPS | ✅ Netzwerkdrucker | ✅ Windows IPP | ✅ lpadmin |
 
 ---
 
-## Entwicklungs-Roadmap
+## Release-Prozess
 
-### v1.0.0 (aktuell)
-- [x] Server: Docker Compose + FastAPI + usbipd
-- [x] Web-Dashboard
-- [x] mDNS Auto-Discovery
-- [x] Cross-Platform Client (Linux/Win/Mac)
-- [x] USB-Gerät Attach/Detach
-- [x] GitHub Actions CI/CD
+Neues Release erstellen:
 
-### v1.1.0 (geplant)
-- [ ] Authentifizierung (API-Keys, Passwort)
-- [ ] Gerätezugriffslisten (Whitelist/Blacklist)
-- [ ] Serial-Forwarding-Modus für macOS
-- [ ] Standalone-Binaries (PyInstaller) für Windows/Mac
-- [ ] Systemd-Service-Mode (ohne Docker)
+```bash
+# Version anpassen
+echo "1.1.0" > VERSION
 
-### v1.2.0 (geplant)
-- [ ] macOS nativer Kernel-Treiber (Network Extension)
-- [ ] Mobile App (iOS/Android) für Monitoring
-- [ ] Mehrere Server gleichzeitig
-- [ ] Geräteprofil-Speicherung (Auto-Reconnect)
+# Commit + Tag
+git add -A && git commit -m "Release v1.1.0"
+git tag v1.1.0
+git push && git push --tags
+```
+
+GitHub Actions baut dann automatisch:
+- Docker Image (linux/arm64 + linux/amd64) → GitHub Container Registry
+- macOS `.dmg` → GitHub Release
+- Windows `.exe` → GitHub Release
 
 ---
 
 ## Abhängigkeiten
 
 ### Server
-| Paket | Version | Beschreibung |
-|-------|---------|-------------|
+| Paket | Version | Zweck |
+|-------|---------|-------|
 | fastapi | 0.115.0 | Web-Framework |
 | uvicorn | 0.30.6 | ASGI-Server |
-| pydantic | 2.9.2 | Datenvalidierung |
-| pyusb | 1.2.1 | USB-Geräteerkennung |
-| zeroconf | 0.136.2 | mDNS/Bonjour |
-| psutil | 6.1.0 | Systeminfo |
+| pyusb | 1.2.1 | USB-Erkennung |
+| zeroconf | 0.136.2 | mDNS |
+| psutil | 6.1.0 | System-Monitoring |
 
 ### Client
-| Paket | Version | Beschreibung |
-|-------|---------|-------------|
-| httpx | 0.27.2 | HTTP-Client |
-| zeroconf | 0.136.2 | mDNS-Serversuche |
-| websockets | 13.1 | WebSocket-Client |
-| customtkinter | 5.2.2 | Moderne GUI |
-| Pillow | 10.4.0 | Bildverarbeitung |
+| Paket | Zweck |
+|-------|-------|
+| rumps | macOS Menu Bar |
+| pystray | Windows/Linux Tray |
+| customtkinter | Onboarding UI |
+| zeroconf | Server-Discovery |
+| httpx | API-Client |
+| Pillow | Icon-Rendering |
 
 ---
 
-## Projekthistorie
+## Changelog
 
 | Datum | Version | Änderungen |
 |-------|---------|------------|
-| 2025-04 | 1.0.0 | Initialer Release by BangerTECH: Server + Client, Docker, CI/CD |
+| 2026-04 | 1.0.0 | Initialer Release by BangerTECH |
