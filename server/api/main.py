@@ -2,12 +2,10 @@
 Loki-PrintServer - USB over IP Server
 Main FastAPI application
 """
-import asyncio
 import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Optional
 
 import psutil
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -126,7 +124,7 @@ async def share_device(req: ShareRequest):
         raise HTTPException(status_code=404, detail=f"Device {req.bus_id} not found")
 
     try:
-        state = await forwarder.share_device(
+        await forwarder.share_device(
             bus_id=req.bus_id,
             device_class=target.device_class or "",
             vendor_id=target.vendor_id,

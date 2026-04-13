@@ -488,7 +488,8 @@ class LokiPystrayApp:
     def _add_server_dialog(self):
         import tkinter as tk
         from tkinter import simpledialog
-        root = tk.Tk(); root.withdraw()
+        root = tk.Tk()
+        root.withdraw()
         ip = simpledialog.askstring("Add Server", "Server IP:", initialvalue="192.168.x.x")
         root.destroy()
         if ip:

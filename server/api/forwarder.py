@@ -11,12 +11,10 @@ so every client platform can connect using its best available method.
 """
 import asyncio
 import logging
-import os
 import re
 import shutil
-import signal
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger("loki-printserver.forwarder")

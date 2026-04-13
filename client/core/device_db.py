@@ -7,20 +7,24 @@ from typing import Optional
 
 # Format: "vendor_id:product_id" -> ("Manufacturer", "Product Name", icon)
 KNOWN_DEVICES: dict[str, tuple[str, str, str]] = {
-    # ── USB-Serial Adapters (common in plotters) ──────────────────────────
-    "1a86:7523": ("QinHeng Electronics", "CH340 USB-Serial", "⚡"),
-    "1a86:7522": ("QinHeng Electronics", "CH340K USB-Serial", "⚡"),
-    "1a86:5523": ("QinHeng Electronics", "CH341 USB-Serial", "⚡"),
-    "0403:6001": ("FTDI", "FT232 USB-Serial", "⚡"),
-    "0403:6010": ("FTDI", "FT2232 USB-Serial", "⚡"),
-    "0403:6011": ("FTDI", "FT4232 USB-Serial", "⚡"),
-    "0403:6014": ("FTDI", "FT232H USB-Serial", "⚡"),
-    "10c4:ea60": ("Silicon Labs", "CP2102 USB-Serial", "⚡"),
-    "10c4:ea61": ("Silicon Labs", "CP2105 USB-Serial", "⚡"),
-    "067b:2303": ("Prolific", "PL2303 USB-Serial", "⚡"),
-    "067b:23a3": ("Prolific", "PL2303GC USB-Serial", "⚡"),
+    # ── USB-Serial Adapters used in Cutting Plotters ─────────────────────
+    # CH340 is used by: Vevor, many generic/Chinese plotters & vinyl cutters
+    "1a86:7523": ("Cutting Plotter", "CH340 Serial Cutter (Vevor / Generic)", "✂"),
+    "1a86:7522": ("Cutting Plotter", "CH340K Serial Cutter", "✂"),
+    "1a86:5523": ("Cutting Plotter", "CH341 Serial Cutter", "✂"),
+    # FTDI used by: Roland, Graphtec (older), some professional plotters
+    "0403:6001": ("Cutting Plotter", "FT232 Serial Cutter (Roland / FTDI)", "✂"),
+    "0403:6010": ("Cutting Plotter", "FT2232 Serial Cutter", "✂"),
+    "0403:6011": ("Cutting Plotter", "FT4232 Serial Cutter", "✂"),
+    "0403:6014": ("Cutting Plotter", "FT232H Serial Cutter", "✂"),
+    # CP210x used by: some Liyu, GCC, and budget vinyl cutters
+    "10c4:ea60": ("Cutting Plotter", "CP2102 Serial Cutter (Silicon Labs)", "✂"),
+    "10c4:ea61": ("Cutting Plotter", "CP2105 Serial Cutter", "✂"),
+    # PL2303 used by: older plotters
+    "067b:2303": ("Cutting Plotter", "PL2303 Serial Cutter", "✂"),
+    "067b:23a3": ("Cutting Plotter", "PL2303GC Serial Cutter", "✂"),
 
-    # ── Cutting Plotters ──────────────────────────────────────────────────
+    # ── Cutting Plotters (native USB) ─────────────────────────────────────
     "0b4d:110a": ("Graphtec", "Graphtec Plotter", "✂"),
     "0b4d:110c": ("Graphtec", "FC8600 Cutting Plotter", "✂"),
     "0b4d:1121": ("Graphtec", "CE7000 Cutting Plotter", "✂"),
@@ -52,7 +56,7 @@ KNOWN_DEVICES: dict[str, tuple[str, str, str]] = {
     "03f0:0004": ("HP", "HP DeskJet", "🖨"),
     "03f0:4117": ("HP", "HP LaserJet", "🖨"),
     "04a9:0000": ("Canon", "Canon Printer", "🖨"),
-    "04b8:0005": ("Epson", "Epson Printer", "🖨"),
+    "04b8:0006": ("Epson", "Epson Printer", "🖨"),
     "04e8:3413": ("Samsung", "Samsung Printer", "🖨"),
 
     # ── Common USB Hubs & Controllers ────────────────────────────────────

@@ -4,10 +4,8 @@ Manages USB device sharing via the Linux USB/IP kernel subsystem.
 """
 import asyncio
 import logging
-import os
 import re
 import subprocess
-from datetime import datetime
 from typing import Optional
 
 import usb.core
@@ -41,12 +39,15 @@ USB_CLASS_NAMES = {
 
 # Known USB device names by vendor:product ID
 KNOWN_DEVICES: dict[str, tuple[str, str]] = {
-    "1a86:7523": ("QinHeng Electronics", "CH340 USB-Serial Adapter"),
-    "1a86:7522": ("QinHeng Electronics", "CH340K USB-Serial Adapter"),
-    "1a86:5523": ("QinHeng Electronics", "CH341 USB-Serial Adapter"),
-    "0403:6001": ("FTDI", "FT232 USB-Serial Adapter"),
-    "10c4:ea60": ("Silicon Labs", "CP2102 USB-Serial Adapter"),
-    "067b:2303": ("Prolific", "PL2303 USB-Serial Adapter"),
+    # CH340 = Vevor, generic Chinese cutters, many vinyl/cutting plotters
+    "1a86:7523": ("Cutting Plotter", "CH340 Serial Cutter (Vevor / Generic)"),
+    "1a86:7522": ("Cutting Plotter", "CH340K Serial Cutter"),
+    "1a86:5523": ("Cutting Plotter", "CH341 Serial Cutter"),
+    # FTDI = Roland, Graphtec (older), professional plotters
+    "0403:6001": ("Cutting Plotter", "FT232 Serial Cutter (Roland / FTDI)"),
+    # CP210x = Liyu, GCC, budget vinyl cutters
+    "10c4:ea60": ("Cutting Plotter", "CP2102 Serial Cutter"),
+    "067b:2303": ("Cutting Plotter", "PL2303 Serial Cutter"),
     "0b4d:110a": ("Graphtec", "Graphtec Plotter"),
     "0b4d:110c": ("Graphtec", "FC8600 Cutting Plotter"),
     "0b4d:1121": ("Graphtec", "CE7000 Cutting Plotter"),
@@ -158,9 +159,9 @@ class USBIPManager:
                     manufacturer = known[0]
                 if not product:
                     product = known[1]
-                # Override generic class label for known serial adapters used as plotters
-                if device_class == "Vendor Specific":
-                    device_class = "USB-Serial (Plotter/Printer)"
+                # Override generic class label for serial-based cutters
+                if device_class in ("Vendor Specific", "Device"):
+                    device_class = "Cutting Plotter / Serial"
 
             devices.append(DeviceInfo(
                 bus_id=bus_id,
@@ -224,8 +225,7 @@ class USBIPManager:
         """Get list of clients connected via usbip."""
         clients = []
         try:
-            result = _run(["usbip", "list", "--remote", "localhost"], check=False)
-            # Parse connected clients from usbipd status
+            _run(["usbip", "list", "--remote", "localhost"], check=False)
         except Exception:
             pass
         return clients

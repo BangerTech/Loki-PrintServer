@@ -2,12 +2,11 @@
 Loki-PrintServer - mDNS/Bonjour Discovery
 Announces the server on the local network so clients can find it automatically.
 """
-import asyncio
 import logging
 import socket
 from typing import Optional
 
-from zeroconf import ServiceInfo, Zeroconf
+from zeroconf import ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
 logger = logging.getLogger("loki-printserver.discovery")

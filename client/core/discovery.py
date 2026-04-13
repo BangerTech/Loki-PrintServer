@@ -4,7 +4,6 @@ Finds Loki-PrintServer instances on the local network automatically.
 """
 import socket
 import threading
-import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 

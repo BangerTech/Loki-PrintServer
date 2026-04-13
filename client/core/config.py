@@ -3,10 +3,8 @@ Loki-PrintServer - Client Configuration
 Persists server list and settings to ~/.config/loki-printserver/config.json
 """
 import json
-import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
 
 
 CONFIG_DIR = Path.home() / ".config" / "loki-printserver"
@@ -19,7 +17,7 @@ class ServerEntry:
     port: int = 7576
     name: str = ""
     auto_connect: bool = True
-    color: str = "#7c5cbf"  # accent color per server
+    color: str = "#00bfa5"
 
     def __post_init__(self):
         if not self.name:
