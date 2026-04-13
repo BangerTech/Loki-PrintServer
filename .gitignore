@@ -3,7 +3,10 @@ __pycache__/
 *.pyo
 *.egg-info/
 dist/
-build/
+# Only ignore Python build artifacts, not our build scripts
+build/__pycache__/
+build/*.spec
+build/LokiClient.iconset/
 .eggs/
 *.egg
 
