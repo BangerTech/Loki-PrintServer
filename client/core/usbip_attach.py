@@ -237,10 +237,15 @@ class _USBHelperBridge:
         except Exception:
             pass
 
+    # VIDs of devices that use vendor-specific USB protocol (not serial).
+    # These need the 'vendor' mode helper instead of CDC-ACM.
+    VENDOR_SPECIFIC_VIDS = {"0a50"}  # Mimaki
+
     def start(self, server_ip: str, tcp_port: int,
               vendor_id: str = "", product_id: str = "",
               manufacturer: str = "", product_name: str = "",
-              device_name: str = "") -> Optional[str]:
+              device_name: str = "",
+              usb_mode: str = "") -> Optional[str]:
         if _USBHelperBridge._starting:
             log.debug("loki-usb-helper already starting, skipping duplicate")
             return None
@@ -249,6 +254,11 @@ class _USBHelperBridge:
         if not helper:
             log.info("loki-usb-helper not found, skipping virtual USB")
             return None
+
+        mode = usb_mode
+        if not mode and vendor_id:
+            mode = "vendor" if vendor_id.lower() in self.VENDOR_SPECIFIC_VIDS else "cdc"
+        mode = mode or "cdc"
 
         existing = set(glob.glob("/dev/cu.usbmodem*"))
         _USBHelperBridge._starting = True
@@ -262,16 +272,16 @@ class _USBHelperBridge:
             cmd += [vendor_id, product_id,
                     manufacturer or "BangerTECH",
                     product_name or "Loki Virtual Plotter",
-                    serial_name]
-            log.info("USB identity: VID=%s PID=%s %s / %s → %s",
-                     vendor_id, product_id, manufacturer, product_name, serial_name)
+                    serial_name, mode]
+            log.info("USB identity: VID=%s PID=%s %s / %s → %s (mode=%s)",
+                     vendor_id, product_id, manufacturer, product_name, serial_name, mode)
         elif manufacturer or product_name:
             cmd += ["0000", "0000",
                     manufacturer or "BangerTECH",
                     product_name or "Loki Virtual Plotter",
-                    serial_name]
-            log.info("USB identity: %s / %s → %s",
-                     manufacturer, product_name, serial_name)
+                    serial_name, mode]
+            log.info("USB identity: %s / %s → %s (mode=%s)",
+                     manufacturer, product_name, serial_name, mode)
 
         # Try 1: direct launch (works when AMFI is disabled)
         log.info("Starting loki-usb-helper: %s", " ".join(cmd))
@@ -285,7 +295,7 @@ class _USBHelperBridge:
             self._proc = None
 
         if self._proc:
-            result = self._wait_for_device(existing, timeout=5)
+            result = self._wait_for_device(existing, timeout=5, mode=mode)
             if result:
                 return result
             if self._proc and self._proc.poll() is not None:
@@ -293,7 +303,7 @@ class _USBHelperBridge:
                 log.info("Direct launch failed, trying with admin privileges...")
                 self._proc = None
             elif self._proc and self._proc.poll() is None:
-                result = self._wait_for_device(existing, timeout=10)
+                result = self._wait_for_device(existing, timeout=10, mode=mode)
                 if result:
                     return result
 
@@ -315,7 +325,7 @@ class _USBHelperBridge:
                 if manufacturer or product_name or device_name:
                     mfr = (manufacturer or "BangerTECH").replace('"', '\\\\"')
                     prd = (product_name or "Loki Virtual Plotter").replace('"', '\\\\"')
-                    extra_args = f' {vid_arg} {pid_arg} \\"{mfr}\\" \\"{prd}\\" {serial_name}'
+                    extra_args = f' {vid_arg} {pid_arg} \\"{mfr}\\" \\"{prd}\\" {serial_name} {mode}'
                 osa_cmd = (
                     f'do shell script "\\"{escaped}\\" {server_ip} {tcp_port}'
                     f'{extra_args} '
@@ -331,17 +341,33 @@ class _USBHelperBridge:
                 _USBHelperBridge._starting = False
                 return None
 
-            result = self._wait_for_device(existing, timeout=30)
+            result = self._wait_for_device(existing, timeout=30, mode=mode)
             if result:
                 return result
             self._read_helper_log(helper_log)
 
-        log.warning("loki-usb-helper: no /dev/cu.usbmodem* appeared")
+        log.warning("loki-usb-helper: device did not appear (mode=%s)", mode)
         self.stop()
         _USBHelperBridge._starting = False
         return None
 
-    def _wait_for_device(self, existing: set, timeout: int = 15) -> Optional[str]:
+    def _wait_for_device(self, existing: set, timeout: int = 15,
+                         mode: str = "cdc") -> Optional[str]:
+        if mode == "vendor":
+            # Vendor mode: no serial port — just wait for helper to stabilize
+            for _ in range(min(timeout, 8) * 2):
+                time.sleep(0.5)
+                if self._proc and self._proc.poll() is not None:
+                    rc = self._proc.returncode
+                    if rc != 0:
+                        return None
+            if self._proc and self._proc.poll() is None:
+                self.device_path = "USB (vendor-specific)"
+                log.info("Vendor USB device helper running (no serial port)")
+                _USBHelperBridge._starting = False
+                return self.device_path
+            return None
+
         for _ in range(timeout * 2):
             time.sleep(0.5)
             if self._proc and self._proc.poll() is not None:
@@ -576,14 +602,21 @@ class DeviceAttacher:
         if device_path:
             if bus_id:
                 self._usb_helpers[bus_id] = usb_helper
+            is_vendor = device_path.startswith("USB (")
+            if is_vendor:
+                msg = (f"Plotter ready! (Vendor USB)\n\n"
+                       f"The device appears as the original USB device.\n"
+                       f"Your plotter software should detect it automatically.\n\n"
+                       f"Works with: FineCut, Mimaki software, etc.")
+            else:
+                msg = (f"Plotter ready! (Virtual USB)\n\n"
+                       f"Port: {device_path}\n\n"
+                       f"The device appears as a real USB serial port.\n"
+                       f"Select it in your cutting software's port list.\n\n"
+                       f"Works with: xfcut, Inkcut, Silhouette Studio, etc.")
             return AttachResult(
                 AttachStatus.ATTACHED, AttachMethod.SERIAL,
-                f"Plotter ready! (Virtual USB)\n\n"
-                f"Port: {device_path}\n\n"
-                f"The device appears as a real USB serial port.\n"
-                f"Select it in your cutting software's port list.\n\n"
-                f"Works with: FineCut, xfcut, Inkcut, Silhouette Studio, etc.",
-                local_device=device_path,
+                msg, local_device=device_path,
             )
 
         log.info("Virtual USB not available, falling back to PTY bridge")

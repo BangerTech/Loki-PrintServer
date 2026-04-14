@@ -16,14 +16,17 @@ public struct USBDescriptors {
     public let manufacturer: String
     public let product: String
     public let serialNumber: String
+    public let extraStrings: [UInt8: String]
 
     public init(device: [UInt8], configuration: [UInt8],
-                manufacturer: String, product: String, serialNumber: String) {
+                manufacturer: String, product: String, serialNumber: String,
+                extraStrings: [UInt8: String] = [:]) {
         self.device = device
         self.configuration = configuration
         self.manufacturer = manufacturer
         self.product = product
         self.serialNumber = serialNumber
+        self.extraStrings = extraStrings
     }
 }
 
@@ -58,6 +61,8 @@ open class VirtualUSBDevice: NSObject {
     private let stringManuf: [UInt8]
     private let stringProd: [UInt8]
     private let stringSerial: [UInt8]
+    private let extraStringDescs: [UInt8: [UInt8]]
+    private let endpointTypes: [UInt8: UInt8]   // EP address → transfer type (2=bulk, 3=interrupt)
 
     // MARK: Init
 
@@ -66,6 +71,12 @@ open class VirtualUSBDevice: NSObject {
         self.stringManuf = Self.makeStringDescriptor(descriptors.manufacturer)
         self.stringProd = Self.makeStringDescriptor(descriptors.product)
         self.stringSerial = Self.makeStringDescriptor(descriptors.serialNumber)
+        var extras: [UInt8: [UInt8]] = [:]
+        for (idx, text) in descriptors.extraStrings {
+            extras[idx] = Self.makeStringDescriptor(text)
+        }
+        self.extraStringDescs = extras
+        self.endpointTypes = Self.parseEndpointTypes(descriptors.configuration)
         super.init()
     }
 
@@ -349,8 +360,8 @@ open class VirtualUSBDevice: NSObject {
         } else if (ep & 0x80) != 0 {
             // IN endpoint (device → host)
             let bytes: [UInt8]
-            // Check if it's bulk or interrupt based on descriptor (simplified: use subclass method)
-            if ep == 0x82 {
+            let epType = endpointTypes[UInt8(ep)] ?? 0x02
+            if epType == 0x03 {
                 bytes = handleInterruptIN(endpointAddress: Int(ep), maxLength: maxLen)
             } else {
                 bytes = handleBulkIN(endpointAddress: Int(ep), maxLength: maxLen)
@@ -406,6 +417,10 @@ open class VirtualUSBDevice: NSObject {
                         log("GET_DESCRIPTOR(STRING/\(label)) wLen=\(wLength) → \(d.count)B")
                         return prefix(d, wLength)
                     }
+                    if let extra = extraStringDescs[descIndex] {
+                        log("GET_DESCRIPTOR(STRING/\(label)) wLen=\(wLength) → \(extra.count)B (extra)")
+                        return prefix(extra, wLength)
+                    }
                     log("GET_DESCRIPTOR(STRING/\(label)) → STALL (unknown index)")
                     return nil
                 default:
@@ -448,7 +463,7 @@ open class VirtualUSBDevice: NSObject {
         Data(bytes.prefix(Int(max)))
     }
 
-    private static func makeStringDescriptor(_ text: String) -> [UInt8] {
+    static func makeStringDescriptor(_ text: String) -> [UInt8] {
         let utf16 = Array(text.utf16)
         var result: [UInt8] = [UInt8(2 + utf16.count * 2), 0x03]
         for cp in utf16 {
@@ -456,5 +471,19 @@ open class VirtualUSBDevice: NSObject {
             result.append(UInt8(cp >> 8))
         }
         return result
+    }
+
+    private static func parseEndpointTypes(_ config: [UInt8]) -> [UInt8: UInt8] {
+        var map: [UInt8: UInt8] = [:]
+        var i = 0
+        while i + 1 < config.count {
+            let len = Int(config[i])
+            if len < 2 { break }
+            if config[i + 1] == 0x05 && len >= 4 {
+                map[config[i + 2]] = config[i + 3] & 0x03
+            }
+            i += len
+        }
+        return map
     }
 }

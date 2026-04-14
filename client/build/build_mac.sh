@@ -32,6 +32,7 @@ if command -v swiftc &>/dev/null; then
         "$USB_HELPER_DIR/main.swift" \
         "$USB_HELPER_DIR/VirtualUSBDevice.swift" \
         "$USB_HELPER_DIR/CDCACMDevice.swift" \
+        "$USB_HELPER_DIR/VendorDevice.swift" \
     && codesign --force --sign - \
         --entitlements "$USB_HELPER_DIR/entitlements.plist" \
         "$USB_HELPER_BIN" \

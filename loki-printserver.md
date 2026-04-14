@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.2.4  
+**Version:** 1.3.0  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -441,3 +441,4 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 || 2026-04 | 1.2.0 | Human-Readable Device Names: `/dev/cu.usbmodemMIMAKICGSR1` statt `/dev/cu.usbmodemLOKI7581`. Name aus custom_name, manufacturer+product oder Fallback. Fix: Swift Kompilierfehler (`log()` in statischer Methode). |
 || 2026-04 | 1.2.1 | Fix: CDC SERIAL_STATE Notification — FineCut erkannte den Port, aber Verbindungstest schlug fehl weil macOS nie DCD+DSR-Signal auf Interrupt-EP 0x82 bekam → Bulk-Datentransfer startete nicht. Interrupt-EP `wMaxPacketSize` 8→10 Bytes, `bInterval` 255→16ms. Data-Flow-Logging in usb-helper.log. |
 || 2026-04 | 1.2.4 | Fix: `usbip-host` und `usbserial` Treiberkonflikt — serial forwarding jetzt VOR `usbip bind` (mutual exclusive). `start.sh`: stale `usbip_host` entladen, Plotter zuerst an `usbserial` binden, dann `usbip_host` mit sauberem `match_busid` laden. `_find_serial_device`: korrekte sysfs-Auflösung per `busnum`/`devnum` statt erstes `ttyUSB*`. `_try_bind_usbserial`: native USB-Plotter (Mimaki etc.) automatisch an `usbserial generic` binden. `docker-compose.yml`: `/sys` und `/dev` Mounts für Container-Gerätesichtbarkeit. `AUTO_SHARE_ALL` Default auf `true`. Shutdown bewahrt saved state für auto-restore. Client: `bMaxPacketSize0` 8→64 verhindert abgeschnittene String-Descriptors → korrekte `/dev/cu.usbmodem*`-Namen. `SERIAL_STATE` beim ersten Interrupt-Poll statt nur nach DTR → FineCut-Verbindungstest funktioniert. udev-Regel auf Host für automatische Plotter-Bindung. |
+|| 2026-04 | 1.3.0 | **Vendor-Specific USB Device Mode**: Neues `VendorDevice.swift` erstellt virtuelle USB-Geräte mit den **echten Hersteller-Deskriptoren** (Klasse 0xFF, Vendor-Specific). Für Geräte wie Mimaki, deren Software (FineCut) per IOKit direkt auf das USB-Device zugreift statt über Serial. Automatische Modus-Erkennung per VID (`0x0A50` = vendor, alle anderen = CDC-ACM). `VirtualUSBDevice.swift`: Endpoint-Typ-Erkennung aus Konfigurationsdeskriptor statt hardcoded. Stale-Helper-Cleanup beim App-Start verhindert Phantom-Devices. Per-Port Log-Dateien. |

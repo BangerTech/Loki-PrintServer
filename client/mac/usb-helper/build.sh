@@ -14,7 +14,8 @@ swiftc \
     -o "$OUT" \
     "$SCRIPT_DIR/main.swift" \
     "$SCRIPT_DIR/VirtualUSBDevice.swift" \
-    "$SCRIPT_DIR/CDCACMDevice.swift"
+    "$SCRIPT_DIR/CDCACMDevice.swift" \
+    "$SCRIPT_DIR/VendorDevice.swift"
 
 echo "=== Signing with IOUSBHost entitlement ==="
 
