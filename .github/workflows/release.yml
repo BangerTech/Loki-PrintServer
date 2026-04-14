@@ -157,11 +157,7 @@ jobs:
             | Windows | `LokiClient-Setup.exe` |
             | Linux | `Loki-Client-linux` |
 
-            > **macOS Gatekeeper:** After opening the DMG and dragging to Applications, run once in Terminal:
-            > ```
-            > xattr -cr /Applications/Loki-Client.app
-            > ```
-            > Then right-click → Open. This is only needed on first launch.
+            > **macOS:** First launch → right-click → Open (einmalig, da die App nicht notarisiert ist).
           files: |
             release-assets/Loki-Client-mac/Loki-Client.dmg
             release-assets/Loki-Client-windows/LokiClient-Setup.exe

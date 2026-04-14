@@ -40,21 +40,22 @@ rm -rf build/LokiClient.iconset
 
 # ── 3. Generate PyInstaller .spec with custom Info.plist keys ─────────────────
 echo "[3/5] Generating spec file..."
-cat > build/LokiClient.spec << 'SPECEOF'
+cat > LokiClient.spec << 'SPECEOF'
 # -*- mode: python ; coding: utf-8 -*-
-import os, sys
+import os
+from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
-client_dir = os.path.abspath('.')
+client_dir = SPECPATH
 
 a = Analysis(
-    ['tray_app.py'],
+    [os.path.join(client_dir, 'tray_app.py')],
     pathex=[client_dir],
     binaries=[],
     datas=[
-        ('core', 'core'),
-        ('assets', 'assets'),
-        ('onboarding.py', '.'),
+        (os.path.join(client_dir, 'core'), 'core'),
+        (os.path.join(client_dir, 'assets'), 'assets'),
+        (os.path.join(client_dir, 'onboarding.py'), '.'),
     ],
     hiddenimports=[
         'onboarding',
@@ -76,8 +77,6 @@ a = Analysis(
     noarchive=False,
 )
 
-# Collect-all equivalents
-from PyInstaller.utils.hooks import collect_all
 for pkg in ['rumps', 'zeroconf', 'customtkinter']:
     tmp_datas, tmp_binaries, tmp_hiddenimports = collect_all(pkg)
     a.datas += tmp_datas
@@ -117,7 +116,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='Loki-Client.app',
-    icon='build/LokiClient.icns',
+    icon=os.path.join(client_dir, 'build', 'LokiClient.icns'),
     bundle_identifier='com.bangertech.loki-client',
     info_plist={
         'CFBundleName': 'Loki-Client',
@@ -134,13 +133,13 @@ SPECEOF
 
 # ── 4. PyInstaller ─────────────────────────────────────────────────────────────
 echo "[4/5] Building ${APPNAME}.app with PyInstaller..."
-rm -rf dist build/Loki-Client
+rm -rf dist
 
 pyinstaller \
     --noconfirm \
     --clean \
     --log-level INFO \
-    build/LokiClient.spec
+    LokiClient.spec
 
 echo "    Verifying binary architecture..."
 file "dist/${APPNAME}.app/Contents/MacOS/${APPNAME}"
@@ -184,7 +183,6 @@ echo ""
 echo "  Installation:"
 echo "  1. Open the .dmg"
 echo "  2. Drag Loki-Client to Applications"
-echo "  3. In Terminal: xattr -cr /Applications/Loki-Client.app"
-echo "  4. Right-click the app -> Open (first time only)"
-echo "  5. Loki appears in the menu bar"
+echo "  3. Right-click the app -> Open (first time only)"
+echo "  4. Loki appears in the menu bar"
 echo "=========================================="
