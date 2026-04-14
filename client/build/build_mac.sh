@@ -29,10 +29,17 @@ brew install socat 2>/dev/null || true
 # ── 2. Convert icon → .icns ────────────────────────────────────────────────────
 echo "[2/5] Creating .icns icon..."
 mkdir -p build/LokiClient.iconset
-for SIZE in 16 32 64 128 256 512; do
-    cp "assets/icon_${SIZE}.png" "build/LokiClient.iconset/icon_${SIZE}x${SIZE}.png"
-    cp "assets/icon_${SIZE}.png" "build/LokiClient.iconset/icon_${SIZE}x${SIZE}@2x.png" 2>/dev/null || true
-done
+# Standard macOS iconset: 1x and @2x (= double resolution)
+cp "assets/icon_16.png"  "build/LokiClient.iconset/icon_16x16.png"
+cp "assets/icon_32.png"  "build/LokiClient.iconset/icon_16x16@2x.png"
+cp "assets/icon_32.png"  "build/LokiClient.iconset/icon_32x32.png"
+cp "assets/icon_64.png"  "build/LokiClient.iconset/icon_32x32@2x.png"
+cp "assets/icon_128.png" "build/LokiClient.iconset/icon_128x128.png"
+cp "assets/icon_256.png" "build/LokiClient.iconset/icon_128x128@2x.png"
+cp "assets/icon_256.png" "build/LokiClient.iconset/icon_256x256.png"
+cp "assets/icon_512.png" "build/LokiClient.iconset/icon_256x256@2x.png"
+cp "assets/icon_512.png" "build/LokiClient.iconset/icon_512x512.png"
+cp "assets/icon_512.png" "build/LokiClient.iconset/icon_512x512@2x.png"
 iconutil -c icns "build/LokiClient.iconset" -o "build/LokiClient.icns" 2>/dev/null \
     && echo "    .icns created" \
     || { echo "    iconutil failed, using PNG"; cp "assets/icon_512.png" "build/LokiClient.icns"; }

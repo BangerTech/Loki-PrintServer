@@ -151,7 +151,7 @@ if HAS_RUMPS:
     class LokiMenuBarApp(rumps.App):
 
         def __init__(self, config: LokiConfig):
-            super().__init__("Loki-Client", quit_button=None)
+            super().__init__("Loki-Client", quit_button="Quit Loki")
             self.icon = self._save_icon(connected=False)
             self.config = config
             self.attacher = DeviceAttacher()
@@ -171,6 +171,16 @@ if HAS_RUMPS:
 
             # Immediate first connect
             threading.Thread(target=self._connect_all, daemon=True).start()
+
+            # Ensure cleanup runs on any exit (Dock quit, Cmd+Q, kill)
+            import atexit
+            atexit.register(self._cleanup)
+
+        def _cleanup(self):
+            try:
+                self.discovery.stop()
+            except Exception:
+                pass
 
         def _save_icon(self, connected: bool) -> str:
             img = make_tray_icon(connected)
@@ -326,9 +336,6 @@ if HAS_RUMPS:
                         callback=lambda _, sv=s: self._quick_add(sv)
                     ))
 
-            items.append(None)
-            items.append(rumps.MenuItem("Quit Loki", callback=lambda _: self._quit()))
-
             self.menu = items
 
         # ── Actions ───────────────────────────────────────────────────────────
@@ -402,9 +409,6 @@ if HAS_RUMPS:
                     self._schedule_rebuild()  # always refresh device list
             threading.Thread(target=_do, daemon=True).start()
 
-        def _quit(self):
-            self.discovery.stop()
-            rumps.quit_application()
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -53,8 +53,6 @@ class OnboardingWindow:
         self._discovered: list[DiscoveredServer] = []
         self._selected: Optional[DiscoveredServer] = None
         self._step = 0
-        self._drag_x = 0
-        self._drag_y = 0
 
         self._build()
         self._discovery.start()
@@ -64,78 +62,46 @@ class OnboardingWindow:
 
     def _build(self):
         self.root = ctk.CTk() if HAS_CTK else tk.Tk()
-        self.root.title("Loki-Client Setup")
+        self.root.title("")
         self.root.resizable(False, False)
         self.root.configure(bg=BG)
         self.root.protocol("WM_DELETE_WINDOW", self._skip)
+        self.root.bind_all("<Command-q>", lambda e: self._skip())
 
-        W, H = 560, 540
+        W, H = 560, 520
 
-        # Remove native window chrome — we draw our own title bar
-        self.root.overrideredirect(True)
-
-        # Center
+        # Center on screen
         self.root.update_idletasks()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         self.root.geometry(f"{W}x{H}+{(sw - W) // 2}+{(sh - H) // 2}")
 
-        # On macOS (LSUIElement app) force the window to the front
+        # On macOS: keep native window chrome (traffic lights, rounded corners,
+        # shadow) but make the titlebar transparent so it blends seamlessly into
+        # our dark background — like Spotify/Discord.
         if sys.platform == "darwin":
             try:
-                from AppKit import NSApp
+                from AppKit import NSApp, NSColor
                 NSApp.activateIgnoringOtherApps_(True)
+                self.root.update_idletasks()
+                for nswin in NSApp.windows():
+                    nswin.setTitlebarAppearsTransparent_(True)
+                    nswin.setTitleVisibility_(1)      # NSWindowTitleHidden
+                    r, g, b = 10 / 255, 15 / 255, 30 / 255
+                    nswin.setBackgroundColor_(
+                        NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, 1.0)
+                    )
             except Exception:
                 pass
             self.root.lift()
             self.root.attributes("-topmost", True)
             self.root.after(400, lambda: self.root.attributes("-topmost", False))
 
-        # ── Custom title bar ─────────────────────────────────────────────────
-        titlebar = tk.Frame(self.root, bg=SURFACE, height=38)
-        titlebar.pack(fill=tk.X, side=tk.TOP)
-        titlebar.pack_propagate(False)
-
-        # macOS-style traffic-light buttons
-        lights = tk.Frame(titlebar, bg=SURFACE)
-        lights.pack(side=tk.LEFT, padx=14, pady=0)
-        lights.place(relx=0, rely=0.5, anchor=tk.W, x=14)
-
-        def _circle(parent, color, cmd=None):
-            c = tk.Label(parent, bg=color, width=2, height=1, cursor="hand2" if cmd else "")
-            c.pack(side=tk.LEFT, padx=3)
-            if cmd:
-                c.bind("<Button-1>", lambda e: cmd())
-            return c
-
-        _circle(lights, "#ff5f57", self._skip)   # red  → close
-        _circle(lights, "#febc2e")                # yellow (no-op)
-        _circle(lights, "#28c840")                # green  (no-op)
-
-        tk.Label(titlebar, text="Loki-Client Setup",
-                 bg=SURFACE, fg=MUTED, font=_f(11)).place(relx=0.5, rely=0.5, anchor=tk.CENTER)
-
-        # Dragging
-        titlebar.bind("<Button-1>",   self._drag_start)
-        titlebar.bind("<B1-Motion>",  self._drag_move)
-        lights.bind("<Button-1>",     self._drag_start)
-        lights.bind("<B1-Motion>",    self._drag_move)
-
-        # Thin accent border at the very top
-        tk.Frame(self.root, bg=ACCENT, height=2).pack(fill=tk.X, side=tk.TOP)
-
         # ── Content container ────────────────────────────────────────────────
         self.container = tk.Frame(self.root, bg=BG)
         self.container.pack(fill=tk.BOTH, expand=True)
 
         self._show_welcome()
-
-    def _drag_start(self, event):
-        self._drag_x = event.x_root - self.root.winfo_x()
-        self._drag_y = event.y_root - self.root.winfo_y()
-
-    def _drag_move(self, event):
-        self.root.geometry(f"+{event.x_root - self._drag_x}+{event.y_root - self._drag_y}")
 
     # ── Step 1: Welcome ────────────────────────────────────────────────────────
 
