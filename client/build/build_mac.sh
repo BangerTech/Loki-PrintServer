@@ -48,40 +48,46 @@ from PyInstaller.utils.hooks import collect_all
 block_cipher = None
 client_dir = SPECPATH
 
+# collect_all must run before Analysis so results can be passed as
+# constructor parameters (2-tuple datas format), not appended to the
+# internal TOC (which uses 3-tuples and causes normalize_toc to fail).
+datas = [
+    (os.path.join(client_dir, 'core'), 'core'),
+    (os.path.join(client_dir, 'assets'), 'assets'),
+    (os.path.join(client_dir, 'onboarding.py'), '.'),
+]
+binaries = []
+hiddenimports = [
+    'onboarding',
+    'core.api_client',
+    'core.config',
+    'core.device_db',
+    'core.discovery',
+    'core.usbip_attach',
+    'zeroconf._utils.ipaddress',
+    'zeroconf._handlers.answers',
+    'zeroconf._handlers.record_manager',
+    'zeroconf._services.browser',
+]
+
+for pkg in ['rumps', 'zeroconf', 'customtkinter']:
+    tmp_datas, tmp_binaries, tmp_hiddenimports = collect_all(pkg)
+    datas += tmp_datas
+    binaries += tmp_binaries
+    hiddenimports += tmp_hiddenimports
+
 a = Analysis(
     [os.path.join(client_dir, 'tray_app.py')],
     pathex=[client_dir],
-    binaries=[],
-    datas=[
-        (os.path.join(client_dir, 'core'), 'core'),
-        (os.path.join(client_dir, 'assets'), 'assets'),
-        (os.path.join(client_dir, 'onboarding.py'), '.'),
-    ],
-    hiddenimports=[
-        'onboarding',
-        'core.api_client',
-        'core.config',
-        'core.device_db',
-        'core.discovery',
-        'core.usbip_attach',
-        'zeroconf._utils.ipaddress',
-        'zeroconf._handlers.answers',
-        'zeroconf._handlers.browser',
-        'zeroconf._handlers.record_manager',
-        'zeroconf._services.browser',
-    ],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
 )
-
-for pkg in ['rumps', 'zeroconf', 'customtkinter']:
-    tmp_datas, tmp_binaries, tmp_hiddenimports = collect_all(pkg)
-    a.datas += tmp_datas
-    a.binaries += tmp_binaries
-    a.hiddenimports += tmp_hiddenimports
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
