@@ -198,6 +198,11 @@ class _USBHelperBridge:
                 return os.path.realpath(c)
         return None
 
+    def _get_log_path(self) -> str:
+        log_dir = os.path.expanduser("~/Library/Logs/Loki-Client")
+        os.makedirs(log_dir, exist_ok=True)
+        return os.path.join(log_dir, "usb-helper.log")
+
     def start(self, server_ip: str, tcp_port: int) -> Optional[str]:
         if _USBHelperBridge._starting:
             log.debug("loki-usb-helper already starting, skipping duplicate")
@@ -209,34 +214,70 @@ class _USBHelperBridge:
             return None
 
         existing = set(glob.glob("/dev/cu.usbmodem*"))
-
-        log.info("Starting loki-usb-helper (sudo): %s %s %s", helper, server_ip, tcp_port)
         _USBHelperBridge._starting = True
+        helper_log = self._get_log_path()
 
+        # Try 1: direct launch (works when AMFI is disabled)
+        log.info("Starting loki-usb-helper: %s %s %s", helper, server_ip, tcp_port)
         try:
-            escaped = helper.replace('"', '\\\\"')
-            osa_cmd = (
-                f'do shell script "\\"{escaped}\\" {server_ip} {tcp_port} &" '
-                f'with administrator privileges'
-            )
+            log_fh = open(helper_log, "w")
             self._proc = subprocess.Popen(
-                ["osascript", "-e", osa_cmd],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                [helper, server_ip, str(tcp_port)],
+                stdout=log_fh, stderr=log_fh,
             )
         except Exception as e:
-            log.warning("loki-usb-helper launch failed: %s", e)
-            _USBHelperBridge._starting = False
-            return None
+            log.warning("loki-usb-helper direct launch failed: %s", e)
+            self._proc = None
 
-        for _ in range(60):
+        if self._proc:
+            result = self._wait_for_device(existing, timeout=5)
+            if result:
+                return result
+            if self._proc and self._proc.poll() is not None:
+                self._read_helper_log(helper_log)
+                log.info("Direct launch failed, trying with admin privileges...")
+                self._proc = None
+            elif self._proc and self._proc.poll() is None:
+                # Still running after 5s but no device yet — give more time
+                result = self._wait_for_device(existing, timeout=10)
+                if result:
+                    return result
+
+        # Try 2: sudo via osascript (password dialog)
+        if not self.device_path:
+            log.info("Requesting admin privileges for loki-usb-helper...")
+            try:
+                escaped = helper.replace('"', '\\\\"')
+                osa_cmd = (
+                    f'do shell script "\\"{escaped}\\" {server_ip} {tcp_port} '
+                    f'> \\"{helper_log}\\" 2>&1 &" '
+                    f'with administrator privileges'
+                )
+                self._proc = subprocess.Popen(
+                    ["osascript", "-e", osa_cmd],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+            except Exception as e:
+                log.warning("loki-usb-helper sudo launch failed: %s", e)
+                _USBHelperBridge._starting = False
+                return None
+
+            result = self._wait_for_device(existing, timeout=30)
+            if result:
+                return result
+            self._read_helper_log(helper_log)
+
+        log.warning("loki-usb-helper: no /dev/cu.usbmodem* appeared")
+        self.stop()
+        _USBHelperBridge._starting = False
+        return None
+
+    def _wait_for_device(self, existing: set, timeout: int = 15) -> Optional[str]:
+        for _ in range(timeout * 2):
             time.sleep(0.5)
-            if self._proc.poll() is not None:
+            if self._proc and self._proc.poll() is not None:
                 rc = self._proc.returncode
                 if rc != 0:
-                    stderr = self._proc.stderr.read().decode(errors="replace") if self._proc.stderr else ""
-                    log.warning("loki-usb-helper exited early (rc=%s): %s", rc, stderr[:500])
-                    self._proc = None
-                    _USBHelperBridge._starting = False
                     return None
             current = set(glob.glob("/dev/cu.usbmodem*"))
             new_devices = current - existing
@@ -245,28 +286,30 @@ class _USBHelperBridge:
                 log.info("Virtual USB device appeared: %s", self.device_path)
                 _USBHelperBridge._starting = False
                 return self.device_path
-
-        log.warning("loki-usb-helper: no /dev/cu.usbmodem* appeared within 30s")
-        self.stop()
-        _USBHelperBridge._starting = False
         return None
 
-    def stop(self):
-        # Kill the helper process (runs as root via osascript)
+    def _read_helper_log(self, path: str):
         try:
-            subprocess.run(
-                ["osascript", "-e",
-                 'do shell script "pkill -f loki-usb-helper" with administrator privileges'],
-                timeout=5, capture_output=True,
-            )
+            with open(path) as f:
+                content = f.read().strip()
+            if content:
+                log.warning("loki-usb-helper output: %s", content[:500])
         except Exception:
             pass
+
+    def stop(self):
+        # Kill helper — try regular signal first, then pkill for root processes
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
             try:
                 self._proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 self._proc.kill()
+        try:
+            subprocess.run(["pkill", "-f", "loki-usb-helper"],
+                           timeout=3, capture_output=True)
+        except Exception:
+            pass
         self._proc = None
         self.device_path = None
 

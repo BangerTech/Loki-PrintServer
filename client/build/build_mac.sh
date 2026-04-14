@@ -201,13 +201,19 @@ done
 
 if [ -n "$BUNDLE_HELPER" ]; then
     echo "    Found helper at: $BUNDLE_HELPER"
+    # 1) Re-sign helper with its special entitlements
     codesign --force --sign - \
         --entitlements "$USB_HELPER_DIR/entitlements.plist" \
         "$BUNDLE_HELPER" \
     && echo "    loki-usb-helper re-signed with entitlements" \
-    || echo "    WARNING: re-signing failed"
-    echo "    Verifying entitlements:"
+    || echo "    WARNING: helper re-signing failed"
+    echo "    Verifying helper entitlements:"
     codesign -d --entitlements - "$BUNDLE_HELPER" 2>/dev/null | head -5
+    # 2) Re-sign the app bundle (without --deep to preserve helper's entitlements)
+    echo "    Re-signing app bundle (preserving nested signatures)..."
+    codesign --force --sign - "dist/${APPNAME}.app" \
+    && echo "    App bundle re-signed OK" \
+    || echo "    WARNING: app bundle re-signing failed"
 else
     echo "    loki-usb-helper not in bundle (build skipped or failed)"
     echo "    Searched in: MacOS/, Frameworks/, Resources/"
