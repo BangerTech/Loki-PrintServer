@@ -77,16 +77,19 @@ class _PtyBridge:
         Returns the path to use in cutting/printing software.
         """
         import pty as _pty
+        import tty as _tty
+        import termios as _termios
         self._master_fd, self._slave_fd = _pty.openpty()
         slave_name = os.ttyname(self._slave_fd)
 
-        if OS == "Darwin":
-            import termios
-            attrs = termios.tcgetattr(self._slave_fd)
-            attrs[4] = termios.B9600   # ispeed
-            attrs[5] = termios.B9600   # ospeed
-            attrs[2] |= termios.CLOCAL  # ignore modem control
-            termios.tcsetattr(self._slave_fd, termios.TCSANOW, attrs)
+        _tty.setraw(self._master_fd)
+        _tty.setraw(self._slave_fd)
+
+        attrs = _termios.tcgetattr(self._slave_fd)
+        attrs[4] = _termios.B9600   # ispeed
+        attrs[5] = _termios.B9600   # ospeed
+        attrs[2] |= _termios.CLOCAL
+        _termios.tcsetattr(self._slave_fd, _termios.TCSANOW, attrs)
 
         self.device_path = slave_name
         for candidate in [link, fallback_link]:
