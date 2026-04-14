@@ -179,12 +179,13 @@ if HAS_RUMPS:
         # ── Connection ────────────────────────────────────────────────────────
 
         def _connect_all(self):
+            time.sleep(1)
             for conn in list(self.connections.values()):
                 if not conn.connected:
                     conn.try_connect()
                     if conn.connected:
                         conn.refresh()
-            self.root and self._schedule_rebuild()
+            self._schedule_rebuild()
 
         def _connect_server(self, entry: ServerEntry):
             def _do():
@@ -259,12 +260,16 @@ if HAS_RUMPS:
                     )
 
                     if conn.connected:
-                        if conn.devices:
-                            for dev in conn.devices:
+                        peripherals = [d for d in conn.devices
+                                       if not d.is_infrastructure]
+                        if peripherals:
+                            for dev in peripherals:
                                 mfr, prod, icon = get_display_name(
                                     dev.vendor_id, dev.product_id,
                                     dev.manufacturer, dev.product
                                 )
+                                if dev.custom_name:
+                                    prod = dev.custom_name
                                 is_attached = dev.bus_id in self.attacher.get_attached()
                                 shared_mark = " ✓" if is_attached else (" [shared]" if dev.is_shared else "")
                                 label = f"  {icon}  {prod}{shared_mark}"
@@ -340,15 +345,19 @@ if HAS_RUMPS:
 
         def _share_and_attach(self, dev: DeviceInfo, conn: ServerConnection):
             def _do():
+                fwd_info = dev.forward_info
                 if conn.client:
                     conn.client.share_device(dev.bus_id)
-                result = self.attacher.attach(conn.entry.host, dev.bus_id)
+                    # Fetch fresh forward_info after sharing
+                    fwd_info = conn.client.get_forward_info(dev.bus_id) or fwd_info
+                result = self.attacher.attach(conn.entry.host, dev.bus_id,
+                                              forward_info=fwd_info)
                 if result.status == AttachStatus.ATTACHED:
                     msg = dev.display_name
                     if result.local_device:
                         msg += f" → {result.local_device}"
                     rumps.notification("Device Attached!", msg,
-                                       "Now available as a local USB device.")
+                                       "Now available as a local device.")
                 elif result.status == AttachStatus.UNSUPPORTED:
                     rumps.notification("macOS: USB/IP not available natively",
                                        "Install Lima for full support.",
@@ -467,11 +476,15 @@ class LokiPystrayApp:
 
                 sub_items = []
                 if conn.connected and conn.devices:
-                    for dev in conn.devices:
+                    peripherals = [d for d in conn.devices
+                                   if not d.is_infrastructure]
+                    for dev in peripherals:
                         _, prod, icon = get_display_name(
                             dev.vendor_id, dev.product_id,
                             dev.manufacturer, dev.product
                         )
+                        if dev.custom_name:
+                            prod = dev.custom_name
                         is_att = dev.bus_id in self.attacher.get_attached()
                         mark = " ✓" if is_att else ""
                         sub_items.append(pystray.MenuItem(
@@ -503,9 +516,12 @@ class LokiPystrayApp:
         if dev.bus_id in self.attacher.get_attached():
             self.attacher.detach(dev.bus_id)
         else:
+            fwd_info = dev.forward_info
             if conn.client:
                 conn.client.share_device(dev.bus_id)
-            self.attacher.attach(conn.entry.host, dev.bus_id)
+                fwd_info = conn.client.get_forward_info(dev.bus_id) or fwd_info
+            self.attacher.attach(conn.entry.host, dev.bus_id,
+                                 forward_info=fwd_info)
         conn.refresh()
         self._refresh_icon()
 
@@ -575,6 +591,12 @@ def _launch_tray(config: LokiConfig):
     signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
 
     if HAS_RUMPS and OS == "Darwin":
+        # Hide dock icon — app lives in the menu bar only
+        try:
+            from AppKit import NSApp, NSApplicationActivationPolicyAccessory
+            NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+        except Exception:
+            pass
         app = LokiMenuBarApp(config)
         app.run()
     elif HAS_PYSTRAY:

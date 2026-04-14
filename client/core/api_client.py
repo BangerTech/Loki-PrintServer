@@ -18,13 +18,14 @@ class DeviceInfo:
     device_class: Optional[str]
     speed: Optional[str]
     is_shared: bool
+    is_infrastructure: bool = False
     client_ip: Optional[str] = None
+    forward_info: Optional[dict] = None
+    custom_name: Optional[str] = None
 
     @property
     def display_name(self) -> str:
-        if self.product:
-            return self.product
-        return f"USB Device {self.vendor_id}:{self.product_id}"
+        return self.custom_name or self.product or f"USB Device {self.vendor_id}:{self.product_id}"
 
     @classmethod
     def from_dict(cls, d: dict) -> "DeviceInfo":
@@ -38,7 +39,10 @@ class DeviceInfo:
             device_class=d.get("device_class"),
             speed=d.get("speed"),
             is_shared=d.get("is_shared", False),
+            is_infrastructure=d.get("is_infrastructure", False),
             client_ip=d.get("client_ip"),
+            forward_info=d.get("forward_info"),
+            custom_name=d.get("custom_name"),
         )
 
 
@@ -97,6 +101,14 @@ class LokiAPIClient:
             return j.get("success", False), j.get("message", "")
         except Exception as e:
             return False, str(e)
+
+    def get_forward_info(self, bus_id: str) -> Optional[dict]:
+        try:
+            r = self._client.get(f"{self.base_url}/api/devices/{bus_id}/forward")
+            r.raise_for_status()
+            return r.json()
+        except Exception:
+            return None
 
     def unshare_device(self, bus_id: str) -> tuple[bool, str]:
         try:

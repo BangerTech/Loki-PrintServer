@@ -3,10 +3,12 @@ Loki-PrintServer - USB over IP Server
 Main FastAPI application
 """
 import asyncio
+import json
 import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import psutil
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -17,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from .models import (
     ConnectedClient,
     DeviceInfo,
+    RenameRequest,
     ServerConfig,
     ServerStatus,
     ShareRequest,
@@ -33,6 +36,33 @@ usbip_manager = USBIPManager()
 mdns_announcer = MDNSAnnouncer()
 forwarder = ForwardingManager()
 connected_clients: list[WebSocket] = []
+
+_NAMES_FILE = Path(os.getenv("LOKI_DATA_DIR", "/etc/loki-printserver")) / "custom_names.json"
+_custom_names: dict[str, str] = {}  # "vendor_id:product_id" -> display name
+
+
+def _load_custom_names():
+    global _custom_names
+    try:
+        if _NAMES_FILE.exists():
+            _custom_names = json.loads(_NAMES_FILE.read_text())
+    except Exception as e:
+        logger.warning(f"Could not load custom names: {e}")
+
+
+def _save_custom_names():
+    try:
+        _NAMES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _NAMES_FILE.write_text(json.dumps(_custom_names, indent=2))
+    except Exception as e:
+        logger.error(f"Could not save custom names: {e}")
+
+
+def _apply_custom_names(devices: list[DeviceInfo]):
+    for dev in devices:
+        key = f"{dev.vendor_id}:{dev.product_id}"
+        if key in _custom_names:
+            dev.custom_name = _custom_names[key]
 
 
 async def _auto_restore_devices():
@@ -87,6 +117,7 @@ async def _auto_share_all():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Loki-PrintServer...")
+    _load_custom_names()
     await usbip_manager.start()
     await mdns_announcer.start(
         service_name="LokiPrint",
@@ -155,6 +186,7 @@ async def list_devices():
         if state:
             dev.is_shared = True
             dev.forward_info = forwarder.get_forward_info(dev.bus_id)
+    _apply_custom_names(devices)
     return devices
 
 
@@ -169,6 +201,7 @@ async def list_shared_devices():
             dev.is_shared = True
             dev.forward_info = forwarder.get_forward_info(dev.bus_id)
             result.append(dev)
+    _apply_custom_names(result)
     return result
 
 
@@ -222,6 +255,25 @@ async def toggle_auto_share(bus_id: str, enabled: bool = True):
         raise HTTPException(status_code=404, detail=f"Device {bus_id} is not currently shared")
     forwarder.mark_auto_share(bus_id, enabled)
     return {"success": True, "bus_id": bus_id, "auto_share": enabled}
+
+
+@app.put("/api/devices/{bus_id}/name")
+async def rename_device(bus_id: str, req: RenameRequest):
+    """Set or clear a custom display name for a device."""
+    devices = await usbip_manager.list_devices()
+    target = next((d for d in devices if d.bus_id == bus_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Device {bus_id} not found")
+
+    key = f"{target.vendor_id}:{target.product_id}"
+    name = req.name.strip()
+    if name:
+        _custom_names[key] = name
+    else:
+        _custom_names.pop(key, None)
+    _save_custom_names()
+    await broadcast_event("device_renamed", {"bus_id": bus_id, "custom_name": name or None})
+    return {"success": True, "bus_id": bus_id, "custom_name": name or None}
 
 
 @app.get("/api/devices/{bus_id}/forward")

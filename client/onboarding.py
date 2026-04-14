@@ -382,7 +382,8 @@ class OnboardingWindow:
         tk.Label(self.container, text=f"{server.name}  ({server.ip})",
                  bg=BG, fg=ACCENT2, font=_f(13)).pack(pady=6)
 
-        devices = client.list_devices()
+        all_devices = client.list_devices()
+        devices = [d for d in all_devices if not d.is_infrastructure]
         shared = sum(1 for d in devices if d.is_shared)
 
         info = tk.Frame(self.container, bg=CARD, padx=20, pady=14)

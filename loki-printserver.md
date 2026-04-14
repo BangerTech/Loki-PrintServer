@@ -102,8 +102,9 @@ Client (Mac/Win/Linux)
 | POST | `/api/devices/unshare` | Freigabe beenden |
 | POST | `/api/devices/{bus_id}/auto-share?enabled=true\|false` | Auto-Share-Flag setzen |
 | GET | `/api/devices/{bus_id}/forward` | Forwarding-Details eines Geräts |
+| PUT | `/api/devices/{bus_id}/name` | Custom-Name setzen (`{"name":"..."}`, leer = Reset) |
 | GET | `/api/config` | Server-Konfiguration |
-| WS | `/ws` | Echtzeit-Updates (`device_shared`, `device_unshared`) |
+| WS | `/ws` | Echtzeit-Updates (`device_shared`, `device_unshared`, `device_renamed`) |
 
 ### Forwarding Info (Response von `/api/devices/share`)
 
@@ -182,9 +183,10 @@ Dann werden beim Start **alle erkannten Peripheriegeräte** sofort geshared — 
 
 ```
 /etc/loki-printserver/shared_devices.json
+/etc/loki-printserver/custom_names.json
 ```
 
-Inhalt (Beispiel):
+`shared_devices.json` (Beispiel):
 ```json
 [
   {
@@ -196,6 +198,13 @@ Inhalt (Beispiel):
     "auto_share": true
   }
 ]
+```
+
+`custom_names.json` (Beispiel):
+```json
+{
+  "1a86:7523": "Mein Schneideplotter"
+}
 ```
 
 ---
@@ -371,3 +380,9 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 | 2026-04 | — | Brand-Assets: neues rundes App-Icon + rechteckiges Logo in allen Verzeichnissen. |
 | 2026-04 | — | Crash-Log: Startup-Fehler werden nach `~/Library/Logs/Loki-Client/` geschrieben. |
 | 2026-04 | — | Fix: `USBIPAttacher` → `DeviceAttacher` Import behoben (App startete nicht auf macOS). Startup-Logging + stdout/stderr-Redirect fuer `.app`-Bundles. |
+|| 2026-04 | — | Fix: Tray zeigte permanent "Offline" — `_connect_all` crashte durch `self.root`-Guard. 1s Delay für rumps-Event-Loop. |
+|| 2026-04 | — | Fix: `forward_info` wurde nicht an Attacher übergeben — Geräte konnten nie attached werden. Wird jetzt nach Share vom Server geholt. |
+|| 2026-04 | — | Tray filtert Infrastruktur-Geräte (Hubs, Controller) — nur Peripheriegeräte werden angezeigt. |
+|| 2026-04 | — | macOS: Dock-Icon wird nach Onboarding via `NSApplicationActivationPolicyAccessory` versteckt. |
+|| 2026-04 | — | Custom Device Names: Geräte können im Dashboard umbenannt werden (✏️). Name wird per `vendor_id:product_id` in `custom_names.json` persistiert und an Clients propagiert. |
+|| 2026-04 | — | Onboarding zeigt nur echte Peripheriegeräte (Infrastructure-Filter). |

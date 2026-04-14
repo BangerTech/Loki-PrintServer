@@ -15,9 +15,14 @@ class DeviceInfo(BaseModel):
     device_class: Optional[str] = None
     speed: Optional[str] = None
     is_shared: bool = False
-    is_infrastructure: bool = False  # True for hubs, root controllers, etc.
+    is_infrastructure: bool = False
     client_ip: Optional[str] = None
     forward_info: Optional[dict] = None
+    custom_name: Optional[str] = None
+
+
+class RenameRequest(BaseModel):
+    name: str
 
 
 class ShareRequest(BaseModel):

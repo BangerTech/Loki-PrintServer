@@ -110,6 +110,16 @@
     .auto-share-toggle input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
     .auto-share-toggle.active { color: var(--accent); }
     .device-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .device-name-row { display: flex; align-items: center; gap: 6px; }
+    .device-name-edit { cursor: pointer; opacity: 0; transition: opacity 0.2s; font-size: 0.75rem; color: var(--muted); }
+    .device-card:hover .device-name-edit { opacity: 1; }
+    .device-name-edit:hover { color: var(--accent); }
+    .name-input {
+      background: var(--bg); border: 1px solid var(--accent); color: var(--text);
+      border-radius: 4px; padding: 2px 6px; font-size: 0.95rem; font-weight: 600;
+      font-family: inherit; outline: none; width: 200px;
+    }
+    .custom-badge { font-size: 0.7rem; color: var(--accent); opacity: 0.7; margin-left: 4px; }
   </style>
 </head>
 <body>
@@ -205,13 +215,17 @@
 
     function renderDevice(d, isInfra = false) {
       const icon = DEVICE_ICONS[d.device_class] || (isInfra ? '🔗' : '🔌');
-      const name = d.product || `Device ${d.vendor_id}:${d.product_id}`;
+      const displayName = d.custom_name || d.product || `Device ${d.vendor_id}:${d.product_id}`;
+      const hasCustom = !!d.custom_name;
       const mfr = d.manufacturer ? `${d.manufacturer} · ` : '';
       const fi = d.forward_info || {};
       const autoShare = fi.auto_share || false;
       const badge = d.is_shared
         ? `<span class="badge badge-shared">● Shared</span>`
         : `<span class="badge badge-idle">${isInfra ? 'Infrastructure' : 'Idle'}</span>`;
+      const editBtn = isInfra ? '' :
+        `<span class="device-name-edit" onclick="startRename('${d.bus_id}', this)" title="Rename device">✏️</span>`;
+      const customBadge = hasCustom ? `<span class="custom-badge">(${d.product || ''})</span>` : '';
       const actions = isInfra ? '' : (d.is_shared
         ? `<div class="device-actions">
             <label class="auto-share-toggle ${autoShare ? 'active' : ''}" title="Re-share automatically after server restart">
@@ -227,7 +241,10 @@
         <div class="device-card${isInfra ? ' infra' : ''}">
           <div class="device-icon">${icon}</div>
           <div class="device-info">
-            <div class="device-name">${name}</div>
+            <div class="device-name-row">
+              <span class="device-name">${displayName}</span>${customBadge}
+              ${editBtn}
+            </div>
             <div class="device-meta">${mfr}${d.vendor_id}:${d.product_id} · Bus ${d.bus_id} · ${d.device_class || 'Unknown'}</div>
           </div>
           ${badge}
@@ -305,12 +322,49 @@
       }
     }
 
+    function startRename(busId, editBtn) {
+      const nameEl = editBtn.closest('.device-name-row').querySelector('.device-name');
+      const currentName = nameEl.textContent;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'name-input';
+      input.value = currentName;
+      input.placeholder = 'Custom name (empty = reset)';
+
+      const row = editBtn.closest('.device-name-row');
+      row.innerHTML = '';
+      row.appendChild(input);
+      input.focus();
+      input.select();
+
+      async function save() {
+        const newName = input.value.trim();
+        try {
+          await fetch(`${API}/api/devices/${busId}/name`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName }),
+          });
+          showToast(newName ? `Renamed to "${newName}"` : 'Name reset to default');
+        } catch(e) {
+          showToast('Rename failed', false);
+        }
+        loadDevices();
+      }
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') loadDevices();
+      });
+      input.addEventListener('blur', save);
+    }
+
     // WebSocket for real-time updates
     function connectWS() {
       const ws = new WebSocket(`ws://${location.host}/ws`);
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
-        if (['device_shared', 'device_unshared'].includes(msg.event)) {
+        if (['device_shared', 'device_unshared', 'device_renamed'].includes(msg.event)) {
           loadDevices();
           loadStatus();
         }
