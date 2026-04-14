@@ -244,6 +244,21 @@ if HAS_RUMPS:
                     log.warning("Auto-attach failed %s: %s",
                                 dev.bus_id, result.message)
 
+        def _detach_unshared(self, conn: ServerConnection):
+            """Auto-detach devices that were unshared on the server."""
+            shared_ids = {d.bus_id for d in conn.devices if d.is_shared}
+            for bus_id in list(self.attacher.get_attached()):
+                if bus_id not in shared_ids:
+                    name = bus_id
+                    for d in conn.devices:
+                        if d.bus_id == bus_id:
+                            name = d.custom_name or d.display_name
+                            break
+                    log.info("Auto-detaching %s (no longer shared on server)", bus_id)
+                    self.attacher.detach(bus_id)
+                    rumps.notification("Device detached", name,
+                                       "Server stopped sharing this device.")
+
         def _connect_all(self):
             log.info("Initial connection pass for %d server(s)", len(self.connections))
             time.sleep(1)
@@ -507,6 +522,7 @@ if HAS_RUMPS:
                     if conn.connected:
                         conn.refresh()
                         self._auto_attach_shared(conn)
+                        self._detach_unshared(conn)
                     new_devices = [(d.bus_id, d.is_shared) for d in conn.devices]
                     if conn.connected != was_connected:
                         log.info("Connection state changed: %s → %s (host=%s)",
@@ -567,6 +583,14 @@ class LokiPystrayApp:
                                          usb_info=_usb_info(dev))
             log.info("pystray auto-attach %s → %s (%s)",
                      dev.bus_id, result.status, result.local_device)
+
+    def _detach_unshared(self, conn: ServerConnection):
+        """Auto-detach devices that were unshared on the server."""
+        shared_ids = {d.bus_id for d in conn.devices if d.is_shared}
+        for bus_id in list(self.attacher.get_attached()):
+            if bus_id not in shared_ids:
+                log.info("Auto-detaching %s (no longer shared on server)", bus_id)
+                self.attacher.detach(bus_id)
 
     def _connect_all(self):
         log.info("pystray: initial connection pass")
@@ -681,6 +705,7 @@ class LokiPystrayApp:
                 if conn.connected:
                     conn.refresh()
                     self._auto_attach_shared(conn)
+                    self._detach_unshared(conn)
                 new_devices = [(d.bus_id, d.is_shared) for d in conn.devices]
                 if conn.connected != was_connected or old_devices != new_devices:
                     changed = True
