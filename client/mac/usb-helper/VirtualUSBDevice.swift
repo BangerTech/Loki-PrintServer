@@ -269,6 +269,7 @@ open class VirtualUSBDevice: NSObject {
             case IOUSBHostCIMessageTypeNormalTransfer:
                 try handleNormalTransfer(esm: esm, xfer: xfer)
             case IOUSBHostCIMessageTypeStatusTransfer:
+                pendingResponse = nil
                 try esm.enqueueTransferCompletion(
                     for: xfer, status: IOUSBHostCIMessageStatusSuccess, transferLength: 0)
             default:
@@ -325,14 +326,21 @@ open class VirtualUSBDevice: NSObject {
                 try esm.enqueueTransferCompletion(
                     for: xfer, status: IOUSBHostCIMessageStatusSuccess, transferLength: maxLen)
             } else {
-                // Device→Host data (descriptors, GET_LINE_CODING)
+                // Device→Host data (descriptors, GET_LINE_CODING).
+                // The host may split a single logical transfer into multiple
+                // normal-transfer messages (one per max-packet-size chunk).
+                // Consume pendingResponse incrementally so all bytes arrive.
                 var written = 0
                 if let resp = pendingResponse, !resp.isEmpty,
                    let buf = UnsafeMutableRawPointer(bitPattern: UInt(xfer.pointee.data1)) {
                     let n = min(resp.count, maxLen)
                     resp.withUnsafeBytes { buf.copyMemory(from: $0.baseAddress!, byteCount: n) }
                     written = n
-                    pendingResponse = nil
+                    if n >= resp.count {
+                        pendingResponse = nil
+                    } else {
+                        pendingResponse = resp.suffix(from: n)
+                    }
                 }
                 try esm.enqueueTransferCompletion(
                     for: xfer, status: IOUSBHostCIMessageStatusSuccess, transferLength: written)
@@ -377,17 +385,32 @@ open class VirtualUSBDevice: NSObject {
             switch bRequest {
             case kUSBReqGetDescriptor:
                 switch descType {
-                case kUSBDescDevice: return prefix(descriptors.device, wLength)
-                case kUSBDescConfig: return prefix(descriptors.configuration, wLength)
+                case kUSBDescDevice:
+                    log("GET_DESCRIPTOR(DEVICE) wLen=\(wLength)")
+                    return prefix(descriptors.device, wLength)
+                case kUSBDescConfig:
+                    log("GET_DESCRIPTOR(CONFIG) wLen=\(wLength)")
+                    return prefix(descriptors.configuration, wLength)
                 case kUSBDescString:
+                    let names = ["LangID", "Manufacturer", "Product", "Serial"]
+                    let label = descIndex < names.count ? names[Int(descIndex)] : "idx\(descIndex)"
+                    let desc: [UInt8]?
                     switch descIndex {
-                    case 0: return prefix(string0, wLength)
-                    case 1: return prefix(stringManuf, wLength)
-                    case 2: return prefix(stringProd, wLength)
-                    case 3: return prefix(stringSerial, wLength)
-                    default: return nil
+                    case 0: desc = string0
+                    case 1: desc = stringManuf
+                    case 2: desc = stringProd
+                    case 3: desc = stringSerial
+                    default: desc = nil
                     }
-                default: return nil
+                    if let d = desc {
+                        log("GET_DESCRIPTOR(STRING/\(label)) wLen=\(wLength) → \(d.count)B")
+                        return prefix(d, wLength)
+                    }
+                    log("GET_DESCRIPTOR(STRING/\(label)) → STALL (unknown index)")
+                    return nil
+                default:
+                    log("GET_DESCRIPTOR(type=\(descType)) → nil")
+                    return nil
                 }
             case kUSBReqGetConfig: return Data([1])
             default: return Data()
