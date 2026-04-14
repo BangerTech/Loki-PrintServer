@@ -16,7 +16,8 @@ final class CDCACMDevice: VirtualUSBDevice {
 
     // CDC serial line state
     private var dtrActive = false
-    private var serialStateChanged = false  // only send after DTR change (not during enumeration)
+    private var needInitialNotification = true
+    private var serialStateChanged = false
 
     // Default line coding: 9600 8N1
     private var lineCoding: [UInt8] = [
@@ -135,7 +136,8 @@ final class CDCACMDevice: VirtualUSBDevice {
     }
 
     override func handleInterruptIN(endpointAddress: Int, maxLength: Int) -> [UInt8] {
-        guard serialStateChanged, maxLength >= 10 else { return [] }
+        guard needInitialNotification || serialStateChanged, maxLength >= 10 else { return [] }
+        needInitialNotification = false
         serialStateChanged = false
         let state: UInt8 = 0x03  // DCD + DSR always active (device connected)
         log("CDC: sending SERIAL_STATE notification (DCD+DSR)")
@@ -218,7 +220,7 @@ final class CDCACMDevice: VirtualUSBDevice {
             0x02,        // bDeviceClass: Communications
             0x00,        // bDeviceSubClass
             0x00,        // bDeviceProtocol
-            0x08,        // bMaxPacketSize0
+            0x40,        // bMaxPacketSize0: 64 (avoids multi-packet string descriptors)
             UInt8(actualVID & 0xFF), UInt8(actualVID >> 8),  // idVendor (LE)
             UInt8(actualPID & 0xFF), UInt8(actualPID >> 8),  // idProduct (LE)
             0x00, 0x01,  // bcdDevice: 1.00

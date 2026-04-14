@@ -116,13 +116,19 @@ class ForwardingManager:
         if auto_share:
             state.auto_share = True
 
-        # 1) USB/IP — always try (works for Linux/Windows clients)
-        await self._share_usbip(state, bus_id)
-
-        # 2) Serial forwarding — for serial adapters & plotters
-        if serial_dev or self._find_serial_device(bus_id):
-            dev = serial_dev or self._find_serial_device(bus_id)
+        # 1) Serial forwarding — preferred for macOS clients (CDC-ACM bridge).
+        #    USB/IP bind and usbserial are MUTUALLY EXCLUSIVE for the same
+        #    device — usbip-host steals the device from usbserial, destroying
+        #    the /dev/ttyUSB* node.  So we try serial FIRST.
+        dev = serial_dev or self._find_serial_device(bus_id)
+        if not dev and vendor_id and product_id:
+            dev = await self._try_bind_usbserial(bus_id, vendor_id, product_id)
+        if dev:
             await self._start_serial_forward(state, dev)
+            logger.info(f"Serial forwarding active for {bus_id} — skipping USB/IP bind")
+        else:
+            # 2) USB/IP — fallback for Linux/Windows clients (full USB passthrough)
+            await self._share_usbip(state, bus_id)
 
         # 3) IPP/CUPS — for USB printer class devices
         if "Printer" in device_class or self._is_printer_class(vendor_id, product_id):
@@ -131,8 +137,13 @@ class ForwardingManager:
         self.save_state()
         return state
 
-    async def unshare_device(self, bus_id: str):
-        """Stop all forwarding for a device."""
+    async def unshare_device(self, bus_id: str, *, persist: bool = True):
+        """Stop all forwarding for a device.
+
+        Args:
+            persist: If True, update the saved state file.  Set to False
+                     during shutdown so auto-restore data survives.
+        """
         state = self._states.get(bus_id)
         if not state:
             return
@@ -147,7 +158,8 @@ class ForwardingManager:
             await self._unshare_cups(state)
 
         del self._states[bus_id]
-        self.save_state()
+        if persist:
+            self.save_state()
 
     def get_state(self, bus_id: str) -> Optional[ForwardState]:
         return self._states.get(bus_id)
@@ -356,11 +368,63 @@ class ForwardingManager:
     # ── Helpers ────────────────────────────────────────────────────────────────
 
     def _find_serial_device(self, bus_id: str) -> Optional[str]:
-        """Find /dev/ttyUSB* or /dev/ttyACM* for a given bus_id."""
+        """Find /dev/ttyUSB* or /dev/ttyACM* for a given bus_id.
+
+        The bus_id is in pyusb format 'bus-address' (e.g. '1-4').
+        We match it to a sysfs USB device by comparing busnum+devnum,
+        then look for a tty device in its interface directories.
+        """
         import glob
-        for pattern in ("/dev/ttyUSB*", "/dev/ttyACM*", "/dev/usb/lp*"):
-            for dev in sorted(glob.glob(pattern)):
+        try:
+            bus, addr = bus_id.split("-", 1)
+        except ValueError:
+            return None
+
+        for dev_path in glob.glob("/sys/bus/usb/devices/[0-9]*"):
+            try:
+                busnum = open(f"{dev_path}/busnum").read().strip()
+                devnum = open(f"{dev_path}/devnum").read().strip()
+            except (OSError, FileNotFoundError):
+                continue
+            if busnum != bus or devnum != addr:
+                continue
+            sysfs_name = os.path.basename(dev_path)
+            # Pattern: <sysfs>/<iface>/<ttyUSB0>/tty/<ttyUSB0>
+            for tty_node in glob.glob(f"{dev_path}/{sysfs_name}:*/ttyUSB*/tty/ttyUSB*") + \
+                             glob.glob(f"{dev_path}/{sysfs_name}:*/ttyACM*/tty/ttyACM*"):
+                tty_name = os.path.basename(tty_node)
+                tty_dev = f"/dev/{tty_name}"
+                if os.path.exists(tty_dev):
+                    logger.info(f"Resolved {bus_id} → {tty_dev} (sysfs: {sysfs_name})")
+                    return tty_dev
+            break
+
+        return None
+
+    async def _try_bind_usbserial(self, bus_id: str, vendor_id: str,
+                                    product_id: str) -> Optional[str]:
+        """Bind a native USB device to the generic usbserial driver.
+
+        Some devices (e.g. Mimaki CG-SR) use vendor-specific USB with bulk
+        endpoints but no standard serial class.  Writing their VID:PID to
+        /sys/bus/usb-serial/drivers/generic/new_id makes Linux create a
+        /dev/ttyUSB* node for them.
+        """
+        try:
+            subprocess.run(["modprobe", "usbserial"], capture_output=True, timeout=5)
+            vid_int = int(vendor_id, 16)
+            pid_int = int(product_id, 16)
+            new_id = f"{vid_int:04x} {pid_int:04x}"
+            with open("/sys/bus/usb-serial/drivers/generic/new_id", "w") as f:
+                f.write(new_id)
+            logger.info(f"Bound {vendor_id}:{product_id} to generic usbserial")
+            await asyncio.sleep(1)
+            dev = self._find_serial_device(bus_id)
+            if dev:
                 return dev
+            logger.warning(f"usbserial bound but no tty appeared for {bus_id}")
+        except Exception as e:
+            logger.debug(f"Could not bind {vendor_id}:{product_id} to usbserial: {e}")
         return None
 
     def _is_printer_class(self, vendor_id: str, product_id: str) -> bool:

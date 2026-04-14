@@ -132,9 +132,9 @@ async def lifespan(app: FastAPI):
 
     yield
     logger.info("Shutting down Loki-PrintServer...")
-    # Unshare all devices on shutdown
+    # Stop forwarding processes but keep saved state for auto-restore
     for state in forwarder.get_all_shared():
-        await forwarder.unshare_device(state.bus_id)
+        await forwarder.unshare_device(state.bus_id, persist=False)
     await mdns_announcer.stop()
     await usbip_manager.stop()
 
