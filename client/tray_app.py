@@ -151,36 +151,23 @@ if HAS_RUMPS:
     class LokiMenuBarApp(rumps.App):
 
         def __init__(self, config: LokiConfig):
-            super().__init__("Loki-Client", quit_button="Quit Loki")
+            super().__init__("Loki-Client", quit_button=None)
             self.icon = self._save_icon(connected=False)
             self.config = config
             self.attacher = DeviceAttacher()
             self.connections: dict[str, ServerConnection] = {}
             self.discovery = LokiDiscovery(on_found=self._on_server_discovered)
 
-            # Build connections for all saved servers
             for entry in config.servers:
                 self.connections[entry.host] = ServerConnection(entry)
 
             self.discovery.start()
             self._rebuild_menu()
 
-            # Start background polling
             self._poll_timer = rumps.Timer(self._poll, 5)
             self._poll_timer.start()
 
-            # Immediate first connect
             threading.Thread(target=self._connect_all, daemon=True).start()
-
-            # Ensure cleanup runs on any exit (Dock quit, Cmd+Q, kill)
-            import atexit
-            atexit.register(self._cleanup)
-
-        def _cleanup(self):
-            try:
-                self.discovery.stop()
-            except Exception:
-                pass
 
         def _save_icon(self, connected: bool) -> str:
             img = make_tray_icon(connected)
@@ -335,6 +322,10 @@ if HAS_RUMPS:
                         f"  📡  {s.name}  ({s.ip})",
                         callback=lambda _, sv=s: self._quick_add(sv)
                     ))
+
+            items.append(None)
+            items.append(rumps.MenuItem("Quit Loki",
+                                        callback=lambda _: _os._exit(0)))
 
             self.menu = items
 
@@ -576,6 +567,10 @@ def main():
 
 
 def _launch_tray(config: LokiConfig):
+    import os
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
+
     if HAS_RUMPS and OS == "Darwin":
         app = LokiMenuBarApp(config)
         app.run()
