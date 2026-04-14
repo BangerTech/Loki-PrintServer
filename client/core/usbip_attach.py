@@ -15,6 +15,7 @@ import select
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -164,12 +165,91 @@ class _PtyBridge:
         log.info("PTY bridge cleaned up: %s", self.device_path)
 
 
+class _USBHelperBridge:
+    """
+    Launches the loki-usb-helper Swift binary to create a real virtual USB
+    CDC-ACM device on macOS. The device appears as /dev/cu.usbmodem* and is
+    recognized by IOKit-based applications (FineCut, xfcut, etc.).
+
+    Requires: macOS with SIP kext-signing disabled, ad-hoc signed binary.
+    """
+
+    def __init__(self):
+        self._proc: Optional[subprocess.Popen] = None
+        self.device_path: Optional[str] = None
+
+    @staticmethod
+    def find_helper() -> Optional[str]:
+        """Locate the loki-usb-helper binary."""
+        candidates = []
+        if getattr(sys, "frozen", False):
+            bundle_dir = os.path.dirname(sys.executable)
+            candidates.append(os.path.join(bundle_dir, "loki-usb-helper"))
+            candidates.append(os.path.join(bundle_dir, "..", "Resources", "loki-usb-helper"))
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates.append(os.path.join(script_dir, "..", "mac", "usb-helper", "loki-usb-helper"))
+        if shutil.which("loki-usb-helper"):
+            candidates.append(shutil.which("loki-usb-helper"))
+        for c in candidates:
+            if c and os.path.isfile(c) and os.access(c, os.X_OK):
+                return os.path.realpath(c)
+        return None
+
+    def start(self, server_ip: str, tcp_port: int) -> Optional[str]:
+        helper = self.find_helper()
+        if not helper:
+            log.info("loki-usb-helper not found, skipping virtual USB")
+            return None
+
+        existing = set(glob.glob("/dev/cu.usbmodem*"))
+        log.info("Starting loki-usb-helper: %s %s %s", helper, server_ip, tcp_port)
+
+        try:
+            self._proc = subprocess.Popen(
+                [helper, server_ip, str(tcp_port)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+        except Exception as e:
+            log.warning("loki-usb-helper launch failed: %s", e)
+            return None
+
+        for _ in range(30):
+            time.sleep(0.5)
+            if self._proc.poll() is not None:
+                stderr = self._proc.stderr.read().decode(errors="replace") if self._proc.stderr else ""
+                log.warning("loki-usb-helper exited early (rc=%s): %s",
+                            self._proc.returncode, stderr[:500])
+                self._proc = None
+                return None
+            current = set(glob.glob("/dev/cu.usbmodem*"))
+            new_devices = current - existing
+            if new_devices:
+                self.device_path = sorted(new_devices)[0]
+                log.info("Virtual USB device appeared: %s", self.device_path)
+                return self.device_path
+
+        log.warning("loki-usb-helper: no /dev/cu.usbmodem* appeared within 15s")
+        self.stop()
+        return None
+
+    def stop(self):
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        self._proc = None
+        self.device_path = None
+
+
 class DeviceAttacher:
     """Manages local attachment of remote USB devices using the best method."""
 
     def __init__(self):
         self._attached: dict[str, AttachResult] = {}  # bus_id -> result
         self._bridges: dict[str, _PtyBridge] = {}     # bus_id -> active bridge
+        self._usb_helpers: dict[str, _USBHelperBridge] = {}  # bus_id -> USB helper
 
     def attach(self, server_ip: str, bus_id: str,
                forward_info: Optional[dict] = None) -> AttachResult:
@@ -332,6 +412,25 @@ class DeviceAttacher:
         if not port:
             return AttachResult(AttachStatus.ERROR, message="No serial port info from server")
 
+        # Try virtual USB device first (appears as real /dev/cu.usbmodem*)
+        usb_helper = _USBHelperBridge()
+        device_path = usb_helper.start(server_ip, int(port))
+        if device_path:
+            if bus_id:
+                self._usb_helpers[bus_id] = usb_helper
+            return AttachResult(
+                AttachStatus.ATTACHED, AttachMethod.SERIAL,
+                f"Plotter ready! (Virtual USB)\n\n"
+                f"Port: {device_path}\n\n"
+                f"The device appears as a real USB serial port.\n"
+                f"Select it in your cutting software's port list.\n\n"
+                f"Works with: FineCut, xfcut, Inkcut, Silhouette Studio, etc.",
+                local_device=device_path,
+            )
+
+        log.info("Virtual USB not available, falling back to PTY bridge")
+
+        # Fallback: PTY bridge (works but not visible in IOKit)
         dev_link = f"/dev/cu.loki-plotter-{port}"
         tmp_link = f"/tmp/tty.loki-plotter-{port}"
 
@@ -413,11 +512,14 @@ class DeviceAttacher:
         )
 
     def _detach_serial(self, bus_id: str) -> AttachResult:
+        usb_helper = self._usb_helpers.pop(bus_id, None)
+        if usb_helper:
+            usb_helper.stop()
+            log.info("USB helper stopped for %s", bus_id)
         bridge = self._bridges.pop(bus_id, None)
         if bridge:
             bridge.stop()
             log.info("PTY bridge stopped for %s", bus_id)
-        # Also kill any residual socat processes
         if OS in ("Linux", "Darwin"):
             _run(["pkill", "-f", "tty.loki"])
         return AttachResult(AttachStatus.DETACHED, message="Serial bridge stopped")

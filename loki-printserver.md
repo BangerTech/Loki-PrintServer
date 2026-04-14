@@ -85,7 +85,12 @@ Client (Mac/Win/Linux)
 | `core/discovery.py` | mDNS-Serversuche (Zeroconf) |
 | `core/usbip_attach.py` | Plattform-Attach: USB/IP + Serial + IPP |
 | `assets/` | Rundes App-Icon (alle Größen 16–512 + .ico) + rechteckiges Logo |
-| `build/build_mac.sh` | macOS .app + .dmg Builder (PyInstaller `.spec` + `create-dmg`) |
+| `mac/usb-helper/VirtualUSBDevice.swift` | Basis-Klasse: virtuelles USB-Gerät über IOUSBHostControllerInterface |
+| `mac/usb-helper/CDCACMDevice.swift` | CDC-ACM Implementation: virtueller USB-Seriell-Port mit TCP-Bridge |
+| `mac/usb-helper/main.swift` | Einstiegspunkt für den loki-usb-helper |
+| `mac/usb-helper/entitlements.plist` | Entitlement für IOUSBHostControllerInterface |
+| `mac/usb-helper/build.sh` | Standalone-Build-Script für den USB-Helper |
+| `build/build_mac.sh` | macOS .app + .dmg Builder (PyInstaller `.spec` + `create-dmg` + USB-Helper) |
 | `build/build_windows.bat` | Windows .exe Builder (PyInstaller + Inno Setup) |
 | `build/installer.iss` | Windows Installer-Skript (Inno Setup) |
 
@@ -276,9 +281,25 @@ Geräte der Klasse `Vendor Specific` oder `Device` mit bekannter VID:PID werden 
 
 | Methode | macOS | Windows | Linux |
 |---------|-------|---------|-------|
+| Virtual USB (CDC-ACM) | ✅ `/dev/cu.usbmodem*` (SIP disabled) | — | — |
 | USB/IP | Lima VM (optional) | usbip-win | nativ |
-| Serial (socat) | ✅ `/dev/tty.loki-*` | com0com / TCP | ✅ `/dev/ttyLOKI*` |
+| Serial (PTY) | ✅ `/tmp/tty.loki-*` (Fallback) | com0com / TCP | ✅ `/dev/ttyLOKI*` |
 | IPP/CUPS | ✅ Netzwerkdrucker | ✅ Windows IPP | ✅ lpadmin |
+
+### macOS Virtual USB (loki-usb-helper)
+
+Auf macOS mit deaktiviertem SIP (Kext Signing + Filesystem Protections) erstellt der Loki-Client ein **echtes virtuelles USB CDC-ACM Gerät** über `IOUSBHostControllerInterface`. Dieses Gerät:
+
+- Erscheint als `/dev/cu.usbmodem*` in IOKit
+- Wird von **FineCut**, **xfcut**, **Inkcut** und anderer Schneide-Software erkannt
+- Bridget Daten transparent über TCP zum Loki-Server
+
+**Voraussetzungen:**
+- macOS 10.15+ (Catalina oder neuer)
+- SIP muss (teilweise) deaktiviert sein: `csrutil disable` oder Custom Configuration mit deaktiviertem Kext Signing
+- Das `loki-usb-helper` Binary wird automatisch ad-hoc signiert mit dem `com.apple.developer.usb.host-controller-interface` Entitlement
+
+**Fallback:** Wenn der USB-Helper nicht verfügbar ist oder fehlschlägt, wird automatisch auf den PTY-Bridge-Modus zurückgefallen (`/tmp/tty.loki-*`).
 
 ---
 
@@ -388,3 +409,4 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 || 2026-04 | — | Custom Device Names: Geräte können im Dashboard umbenannt werden (✏️). Name wird per `vendor_id:product_id` in `custom_names.json` persistiert und an Clients propagiert. |
 || 2026-04 | — | Onboarding zeigt nur echte Peripheriegeräte (Infrastructure-Filter). |
 || 2026-04 | — | Logging: `core/logger.py` — zentrales RotatingFileHandler-Logging (2 MB, 3 Backups). macOS: `~/Library/Logs/Loki-Client/loki-client.log`, Linux/Windows: `~/.config/loki-printserver/loki-client.log`. Alle Verbindungen, API-Calls, Discovery-Events, Attach/Detach und Fehler werden geloggt. |
+|| 2026-04 | — | macOS Virtual USB: `loki-usb-helper` (Swift) erstellt echte virtuelle USB CDC-ACM Geräte über `IOUSBHostControllerInterface`. Erscheint als `/dev/cu.usbmodem*` — erkannt von FineCut, xfcut, etc. Benötigt SIP disabled. Automatischer Fallback auf PTY-Bridge wenn nicht verfügbar. |

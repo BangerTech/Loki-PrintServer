@@ -19,15 +19,37 @@ echo "=========================================="
 
 cd "$CLIENT"
 
+# ── 0. Build loki-usb-helper (Swift, virtual USB CDC-ACM) ─────────────────────
+echo "[0/6] Building loki-usb-helper..."
+USB_HELPER_DIR="$CLIENT/mac/usb-helper"
+USB_HELPER_BIN="$USB_HELPER_DIR/loki-usb-helper"
+
+if command -v swiftc &>/dev/null; then
+    swiftc \
+        -O \
+        -framework IOUSBHost \
+        -o "$USB_HELPER_BIN" \
+        "$USB_HELPER_DIR/main.swift" \
+        "$USB_HELPER_DIR/VirtualUSBDevice.swift" \
+        "$USB_HELPER_DIR/CDCACMDevice.swift" \
+    && codesign --force --sign - \
+        --entitlements "$USB_HELPER_DIR/entitlements.plist" \
+        "$USB_HELPER_BIN" \
+    && echo "    loki-usb-helper built and signed" \
+    || echo "    WARNING: loki-usb-helper build failed (non-fatal, PTY fallback available)"
+else
+    echo "    swiftc not found, skipping USB helper build"
+fi
+
 # ── 1. Dependencies ────────────────────────────────────────────────────────────
-echo "[1/5] Installing dependencies..."
+echo "[1/6] Installing dependencies..."
 pip3 install --quiet pyinstaller pillow rumps zeroconf websockets \
     customtkinter pystray packaging pyobjc-framework-Cocoa 2>&1 | grep -E "Successfully|already|ERROR" || true
 brew install create-dmg 2>/dev/null || true
 brew install socat 2>/dev/null || true
 
 # ── 2. Convert icon → .icns ────────────────────────────────────────────────────
-echo "[2/5] Creating .icns icon..."
+echo "[2/6] Creating .icns icon..."
 mkdir -p build/LokiClient.iconset
 # Standard macOS iconset: 1x and @2x (= double resolution)
 cp "assets/icon_16.png"  "build/LokiClient.iconset/icon_16x16.png"
@@ -46,7 +68,7 @@ iconutil -c icns "build/LokiClient.iconset" -o "build/LokiClient.icns" 2>/dev/nu
 rm -rf build/LokiClient.iconset
 
 # ── 3. Generate PyInstaller .spec with custom Info.plist keys ─────────────────
-echo "[3/5] Generating spec file..."
+echo "[3/6] Generating spec file..."
 cat > LokiClient.spec << 'SPECEOF'
 # -*- mode: python ; coding: utf-8 -*-
 import os
@@ -64,6 +86,11 @@ datas = [
     (os.path.join(client_dir, 'onboarding.py'), '.'),
 ]
 binaries = []
+
+# Include loki-usb-helper if it was built
+usb_helper = os.path.join(client_dir, 'mac', 'usb-helper', 'loki-usb-helper')
+if os.path.isfile(usb_helper):
+    binaries.append((usb_helper, '.'))
 hiddenimports = [
     'onboarding',
     'core.api_client',
@@ -145,7 +172,7 @@ app = BUNDLE(
 SPECEOF
 
 # ── 4. PyInstaller ─────────────────────────────────────────────────────────────
-echo "[4/5] Building ${APPNAME}.app with PyInstaller..."
+echo "[4/6] Building ${APPNAME}.app with PyInstaller..."
 rm -rf dist
 
 pyinstaller \
@@ -159,8 +186,21 @@ file "dist/${APPNAME}.app/Contents/MacOS/${APPNAME}"
 
 echo "    ${APPNAME}.app ready."
 
-# ── 5. DMG ─────────────────────────────────────────────────────────────────────
-echo "[5/5] Creating ${APPNAME}.dmg..."
+# ── 5. Re-sign USB helper inside the bundle (preserve entitlements) ────────────
+echo "[5/6] Re-signing loki-usb-helper in bundle..."
+BUNDLE_HELPER="dist/${APPNAME}.app/Contents/MacOS/loki-usb-helper"
+if [ -f "$BUNDLE_HELPER" ]; then
+    codesign --force --sign - \
+        --entitlements "$USB_HELPER_DIR/entitlements.plist" \
+        "$BUNDLE_HELPER" \
+    && echo "    loki-usb-helper re-signed with entitlements" \
+    || echo "    WARNING: re-signing failed"
+else
+    echo "    loki-usb-helper not in bundle (build skipped or failed)"
+fi
+
+# ── 6. DMG ─────────────────────────────────────────────────────────────────────
+echo "[6/6] Creating ${APPNAME}.dmg..."
 rm -f "dist/${APPNAME}.dmg"
 
 if command -v create-dmg &>/dev/null; then
