@@ -9,13 +9,39 @@ Features:
   - Onboarding on first launch
   - Persistent server list
 """
-import argparse
-import platform
+from __future__ import annotations
+
+import datetime
+import pathlib
 import sys
-import threading
-import time
-import webbrowser
-from typing import Optional
+import traceback
+
+# ── Early bootstrap for macOS .app bundles ──────────────────────────────────
+# In a PyInstaller .app with console=False, stdout/stderr can be None.
+# Any print/log call would then crash silently. Redirect to a log file first.
+_LOG_DIR = pathlib.Path.home() / "Library" / "Logs" / "Loki-Client"
+_log_fh = None
+
+if getattr(sys, "frozen", False) and sys.platform == "darwin":
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    _log_fh = open(  # noqa: SIM115
+        _LOG_DIR / "startup.log", "a", encoding="utf-8",
+    )
+    _log_fh.write(f"\n{'='*60}\n")
+    _log_fh.write(f"Loki-Client startup  {datetime.datetime.now()}\n")
+    _log_fh.flush()
+    if sys.stdout is None:
+        sys.stdout = _log_fh
+    if sys.stderr is None:
+        sys.stderr = _log_fh
+
+# ── Now safe to import everything else ──────────────────────────────────────
+import argparse  # noqa: E402
+import platform  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import webbrowser  # noqa: E402
+from typing import Optional  # noqa: E402
 
 OS = platform.system()
 
@@ -29,7 +55,7 @@ from core.api_client import DeviceInfo, LokiAPIClient, ServerStatus  # noqa: E40
 from core.config import LokiConfig, ServerEntry  # noqa: E402
 from core.device_db import get_display_name  # noqa: E402
 from core.discovery import DiscoveredServer, LokiDiscovery  # noqa: E402
-from core.usbip_attach import AttachStatus, USBIPAttacher  # noqa: E402
+from core.usbip_attach import AttachStatus, DeviceAttacher  # noqa: E402
 
 try:
     import pystray
@@ -128,7 +154,7 @@ if HAS_RUMPS:
             super().__init__("Loki-Client", quit_button=None)
             self.icon = self._save_icon(connected=False)
             self.config = config
-            self.attacher = USBIPAttacher()
+            self.attacher = DeviceAttacher()
             self.connections: dict[str, ServerConnection] = {}
             self.discovery = LokiDiscovery(on_found=self._on_server_discovered)
 
@@ -388,7 +414,7 @@ if HAS_RUMPS:
 class LokiPystrayApp:
     def __init__(self, config: LokiConfig):
         self.config = config
-        self.attacher = USBIPAttacher()
+        self.attacher = DeviceAttacher()
         self.connections: dict[str, ServerConnection] = {}
         self.discovery = LokiDiscovery(on_found=self._on_server_discovered)
 
@@ -557,14 +583,13 @@ def _launch_tray(config: LokiConfig):
 
 
 if __name__ == "__main__":
-    import traceback
-    import pathlib
-    import datetime
     try:
         main()
     except Exception:
-        log_dir = pathlib.Path.home() / "Library" / "Logs" / "Loki-Client"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / f"crash-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
-        log_file.write_text(traceback.format_exc())
+        _LOG_DIR.mkdir(parents=True, exist_ok=True)
+        crash = _LOG_DIR / f"crash-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
+        crash.write_text(traceback.format_exc())
+        if _log_fh:
+            _log_fh.write(f"CRASH: {traceback.format_exc()}\n")
+            _log_fh.flush()
         raise

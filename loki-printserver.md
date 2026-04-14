@@ -24,8 +24,8 @@ docker compose up -d
 
 Unter **https://github.com/BangerTech/Loki-PrintServer/releases** die neueste Version herunterladen:
 
-- **macOS (Apple Silicon + Intel):** `Loki-Client.dmg` → in Applications ziehen
-- **Windows:** `Loki-Client-Setup.exe` → Installer ausführen
+- **macOS:** `Loki-Client.dmg` → in Applications ziehen → Rechtsklick → Öffnen (einmalig, da nicht notarisiert)
+- **Windows:** `LokiClient-Setup.exe` → Installer ausführen
 - **Linux:** `Loki-Client-linux` → ausführbar machen und starten
 
 ---
@@ -76,17 +76,17 @@ Client (Mac/Win/Linux)
 
 | Datei | Beschreibung |
 |-------|-------------|
-| `tray_app.py` | Haupt-App: macOS Menu Bar (rumps) + Tray (pystray) |
-| `onboarding.py` | Onboarding-Wizard (Schritt 1-4, customtkinter) |
+| `tray_app.py` | Haupt-App: macOS Menu Bar (rumps) + Tray (pystray); Crash-Log nach `~/Library/Logs/Loki-Client/` |
+| `onboarding.py` | Onboarding-Wizard (4 Schritte, customtkinter); bringt sich via `NSApp.activateIgnoringOtherApps_` in den Vordergrund |
 | `core/api_client.py` | HTTP-Client für Server-API |
 | `core/config.py` | Server-Liste persistieren (`~/.config/loki-printserver/`) |
 | `core/device_db.py` | USB-ID Datenbank (CH340, Plotter, Drucker, etc.) |
 | `core/discovery.py` | mDNS-Serversuche (Zeroconf) |
 | `core/usbip_attach.py` | Plattform-Attach: USB/IP + Serial + IPP |
-| `assets/` | Logo + Icons in allen Größen |
-| `build/build_mac.sh` | macOS .app + .dmg Builder (PyInstaller + iconutil) |
-| `build/build_windows.bat` | Windows .exe Builder (PyInstaller) |
-| `build/installer.iss` | Windows Installer (Inno Setup) |
+| `assets/` | Rundes App-Icon (alle Größen 16–512 + .ico) + rechteckiges Logo |
+| `build/build_mac.sh` | macOS .app + .dmg Builder (PyInstaller `.spec` + `create-dmg`) |
+| `build/build_windows.bat` | Windows .exe Builder (PyInstaller + Inno Setup) |
+| `build/installer.iss` | Windows Installer-Skript (Inno Setup) |
 
 ---
 
@@ -274,19 +274,47 @@ Geräte der Klasse `Vendor Specific` oder `Device` mit bekannter VID:PID werden 
 
 ## Release-Prozess
 
-Neues Release erstellen:
+> **Für KI-Agenten:** Nach jeder Änderung an Client- oder Build-Dateien **immer** committen, pushen und das Tag neu setzen. Nur so startet der GitHub-Actions-Workflow und ein neues `.dmg`/`.exe`/Binary wird gebaut. Änderungen ohne Tag-Push erzeugen **kein** Release.
+
+### Normaler Ablauf nach Änderungen
 
 ```bash
-# Version anpassen & taggen
-git add -A && git commit -m "Release v1.1.0"
-git tag v1.1.0
-git push && git push --tags
+# 1. Alle Änderungen committen
+git add -A
+git commit -m "fix: beschreibung der änderung"
+
+# 2. Auf main pushen
+git push origin main
+
+# 3. Altes Tag löschen (lokal + remote)
+git tag -d v1.0.0
+git push origin :refs/tags/v1.0.0
+
+# 4. Neues Tag setzen und pushen → startet GitHub Actions
+git tag -a v1.0.0 -m "v1.0.0"
+git push origin v1.0.0
 ```
 
-GitHub Actions baut dann automatisch:
-- macOS `.dmg` → GitHub Release
-- Windows `.exe` → GitHub Release
-- Linux Binary → GitHub Release
+Der Push des Tags auf `v*.*.*` triggert `.github/workflows/release.yml` und baut alle drei Plattformen.
+
+### Was GitHub Actions automatisch macht
+
+| Job | Runner | Ausgabe |
+|-----|--------|---------|
+| `build-mac` | `macos-15-intel` (x86_64) | `Loki-Client.dmg` via `create-dmg` |
+| `build-windows` | `windows-latest` | `LokiClient-Setup.exe` (Inno Setup) |
+| `build-linux` | `ubuntu-latest` | `Loki-Client-linux` (onefile) |
+| `release` | `ubuntu-latest` | Löscht alten Release, erstellt neuen mit allen Assets |
+
+Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` bevor er neu erstellt wird — dadurch wird auch die Release-Beschreibung immer neu geschrieben.
+
+### Checkliste vor jedem Tag-Push
+
+- [ ] Alle geänderten Dateien committed (`git status` zeigt nichts Offenes)
+- [ ] `git push origin main` erfolgreich
+- [ ] Altes Tag lokal und remote gelöscht
+- [ ] Neues annotiertes Tag (`-a`) gesetzt und gepusht
+- [ ] GitHub Actions unter https://github.com/BangerTech/Loki-PrintServer/actions prüfen ob der Workflow gestartet ist
 
 ---
 
@@ -310,6 +338,23 @@ GitHub Actions baut dann automatisch:
 | zeroconf | Server-Discovery |
 | httpx | API-Client |
 | Pillow | Icon-Rendering |
+| pyobjc-framework-Cocoa | `NSApp.activateIgnoringOtherApps_` (macOS Fenster-Fokus) |
+| pyinstaller | macOS/Linux Bundle |
+
+---
+
+## macOS Build — bekannte Stolperfallen
+
+| Problem | Ursache | Fix |
+|---------|---------|-----|
+| `IncompatibleBinaryArchError: not a fat binary` | `PIL/_imagingtk.so` ist arm64-only, kein universal2-Wheel verfügbar | Runner auf `macos-15-intel` (x86_64) umstellen, kein `--target-arch` nötig |
+| `macos-13` runner error | `macos-13` seit Dez 2025 abgeschaltet | `macos-15-intel` verwenden |
+| App öffnet sich nicht / keine Menüleiste | `LSUIElement=True` → Onboarding-Fenster öffnet hinter anderen Fenstern | `NSApp.activateIgnoringOtherApps_(True)` in `onboarding.py` |
+| "App ist beschädigt" | Gatekeeper-Quarantäne durch Browser-Download | Rechtsklick → Öffnen; oder `xattr -cr /Applications/Loki-Client.app` |
+| "Programm wird auf diesem Mac nicht unterstützt" | Falscher Build-Runner (arm64 statt x86_64) | `macos-15-intel` runner bestätigt x86_64 |
+| Bundle-Modifikationen nach PyInstaller | Post-build Info.plist/Datei-Kopien brechen Ad-hoc-Signatur | `info_plist={}` im `.spec`-`BUNDLE`-Block verwenden, keine Post-build-Patches |
+| `ValueError: not enough values to unpack` | `collect_all()` Ergebnisse per `+=` auf `a.datas` TOC-Objekt | `collect_all()` **vor** `Analysis()` aufrufen, Ergebnisse als Konstruktor-Parameter übergeben |
+| `script not found` | Spec-Datei in `client/build/`, `SPECPATH` zeigt dorthin | Spec in `client/` schreiben, `SPECPATH` für alle Pfade nutzen |
 
 ---
 
@@ -318,7 +363,11 @@ GitHub Actions baut dann automatisch:
 | Datum | Version | Änderungen |
 |-------|---------|------------|
 | 2026-04 | 1.0.0 | Initialer Release by BangerTECH |
-| 2026-04 | 1.0.1 | Auto-Share: Geräte werden nach Neustart automatisch wiederhergestellt. `AUTO_SHARE_ALL` Env-Var. Dashboard Auto-Share Toggle pro Gerät. |
-| 2026-04 | 1.0.2 | Geräteliste: Trennung in Peripheriegeräte und USB-Infrastruktur (Hubs/Controller). Infrastruktur ausgegraut ohne Share-Funktion. |
-| 2026-04 | 1.0.3 | Dashboard-Icons: ✂️ für Schneideplotter, 🔊 Audio, 🎥 Video, 📶 Wireless. |
-| 2026-04 | 1.0.4 | Ruff Lint-Fixes: alle F541/F401/F841/E701/E402 Warnings im Client-Code behoben. |
+| 2026-04 | — | Auto-Share: Geräte werden nach Neustart automatisch wiederhergestellt. `AUTO_SHARE_ALL` Env-Var. Dashboard Auto-Share Toggle pro Gerät. |
+| 2026-04 | — | Geräteliste: Trennung in Peripheriegeräte und USB-Infrastruktur (Hubs/Controller). Infrastruktur ausgegraut ohne Share-Funktion. |
+| 2026-04 | — | Dashboard-Icons: ✂️ Plotter, 🔊 Audio, 🎥 Video, 📶 Wireless. |
+| 2026-04 | — | macOS Build: universal2 → `macos-15-intel` (x86_64); `.spec`-Datei statt CLI-Flags; `create-dmg` für korrektes DMG. |
+| 2026-04 | — | macOS Onboarding: `NSApp.activateIgnoringOtherApps_` damit Fenster bei `LSUIElement=True` im Vordergrund erscheint. |
+| 2026-04 | — | Brand-Assets: neues rundes App-Icon + rechteckiges Logo in allen Verzeichnissen. |
+| 2026-04 | — | Crash-Log: Startup-Fehler werden nach `~/Library/Logs/Loki-Client/` geschrieben. |
+| 2026-04 | — | Fix: `USBIPAttacher` → `DeviceAttacher` Import behoben (App startete nicht auf macOS). Startup-Logging + stdout/stderr-Redirect fuer `.app`-Bundles. |
