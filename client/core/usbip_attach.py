@@ -198,10 +198,11 @@ class _USBHelperBridge:
                 return os.path.realpath(c)
         return None
 
-    def _get_log_path(self) -> str:
+    def _get_log_path(self, tcp_port: int = 0) -> str:
         log_dir = os.path.expanduser("~/Library/Logs/Loki-Client")
         os.makedirs(log_dir, exist_ok=True)
-        return os.path.join(log_dir, "usb-helper.log")
+        suffix = f"-{tcp_port}" if tcp_port else ""
+        return os.path.join(log_dir, f"usb-helper{suffix}.log")
 
     @staticmethod
     def _make_device_name(device_name: str, manufacturer: str,
@@ -220,6 +221,22 @@ class _USBHelperBridge:
         clean = re.sub(r"[^a-zA-Z0-9]", "", raw)
         return clean if clean else f"LOKI{tcp_port}"
 
+    @staticmethod
+    def kill_stale_helpers():
+        """Kill loki-usb-helper processes from previous sessions.
+
+        Stale helpers keep old /dev/cu.usbmodem* nodes alive, blocking
+        macOS from reusing the same serial-number-based device name for
+        new instances (falls back to location-ID names instead).
+        """
+        try:
+            subprocess.run(["pkill", "-f", "loki-usb-helper"],
+                           timeout=3, capture_output=True)
+            time.sleep(1.5)
+            log.info("Killed stale loki-usb-helper processes")
+        except Exception:
+            pass
+
     def start(self, server_ip: str, tcp_port: int,
               vendor_id: str = "", product_id: str = "",
               manufacturer: str = "", product_name: str = "",
@@ -235,7 +252,7 @@ class _USBHelperBridge:
 
         existing = set(glob.glob("/dev/cu.usbmodem*"))
         _USBHelperBridge._starting = True
-        helper_log = self._get_log_path()
+        helper_log = self._get_log_path(tcp_port)
 
         serial_name = self._make_device_name(
             device_name, manufacturer, product_name, tcp_port)
@@ -373,6 +390,8 @@ class DeviceAttacher:
         self._attached: dict[str, AttachResult] = {}  # bus_id -> result
         self._bridges: dict[str, _PtyBridge] = {}     # bus_id -> active bridge
         self._usb_helpers: dict[str, _USBHelperBridge] = {}  # bus_id -> USB helper
+        if OS == "Darwin":
+            _USBHelperBridge.kill_stale_helpers()
 
     def attach(self, server_ip: str, bus_id: str,
                forward_info: Optional[dict] = None,
