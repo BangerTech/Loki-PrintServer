@@ -202,6 +202,9 @@ if HAS_RUMPS:
 
         def _auto_attach_shared(self, conn: ServerConnection):
             """Automatically attach every device the server has already shared."""
+            if self.attacher.is_attaching():
+                log.debug("Attach already in progress (password dialog?), skipping auto-attach")
+                return
             already = set(self.attacher.get_attached())
             for dev in conn.devices:
                 if dev.is_infrastructure or dev.bus_id in already:
@@ -536,6 +539,9 @@ class LokiPystrayApp:
         self._icon.run()
 
     def _auto_attach_shared(self, conn: ServerConnection):
+        if self.attacher.is_attaching():
+            log.debug("Attach already in progress (password dialog?), skipping auto-attach")
+            return
         already = set(self.attacher.get_attached())
         for dev in conn.devices:
             if dev.is_infrastructure or dev.bus_id in already or not dev.is_shared:

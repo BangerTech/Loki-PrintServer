@@ -174,6 +174,8 @@ class _USBHelperBridge:
     Requires: macOS with SIP kext-signing disabled, ad-hoc signed binary.
     """
 
+    _starting = False  # class-level guard against concurrent starts
+
     def __init__(self):
         self._proc: Optional[subprocess.Popen] = None
         self.device_path: Optional[str] = None
@@ -197,6 +199,10 @@ class _USBHelperBridge:
         return None
 
     def start(self, server_ip: str, tcp_port: int) -> Optional[str]:
+        if _USBHelperBridge._starting:
+            log.debug("loki-usb-helper already starting, skipping duplicate")
+            return None
+
         helper = self.find_helper()
         if not helper:
             log.info("loki-usb-helper not found, skipping virtual USB")
@@ -205,6 +211,7 @@ class _USBHelperBridge:
         existing = set(glob.glob("/dev/cu.usbmodem*"))
 
         log.info("Starting loki-usb-helper (sudo): %s %s %s", helper, server_ip, tcp_port)
+        _USBHelperBridge._starting = True
 
         try:
             escaped = helper.replace('"', '\\\\"')
@@ -218,9 +225,10 @@ class _USBHelperBridge:
             )
         except Exception as e:
             log.warning("loki-usb-helper launch failed: %s", e)
+            _USBHelperBridge._starting = False
             return None
 
-        for _ in range(30):
+        for _ in range(60):
             time.sleep(0.5)
             if self._proc.poll() is not None:
                 rc = self._proc.returncode
@@ -228,16 +236,19 @@ class _USBHelperBridge:
                     stderr = self._proc.stderr.read().decode(errors="replace") if self._proc.stderr else ""
                     log.warning("loki-usb-helper exited early (rc=%s): %s", rc, stderr[:500])
                     self._proc = None
+                    _USBHelperBridge._starting = False
                     return None
             current = set(glob.glob("/dev/cu.usbmodem*"))
             new_devices = current - existing
             if new_devices:
                 self.device_path = sorted(new_devices)[0]
                 log.info("Virtual USB device appeared: %s", self.device_path)
+                _USBHelperBridge._starting = False
                 return self.device_path
 
-        log.warning("loki-usb-helper: no /dev/cu.usbmodem* appeared within 15s")
+        log.warning("loki-usb-helper: no /dev/cu.usbmodem* appeared within 30s")
         self.stop()
+        _USBHelperBridge._starting = False
         return None
 
     def stop(self):
@@ -343,6 +354,10 @@ class DeviceAttacher:
 
     def get_attached(self) -> list[str]:
         return list(self._attached.keys())
+
+    def is_attaching(self) -> bool:
+        """True if a USB helper is currently waiting for user input (password dialog)."""
+        return _USBHelperBridge._starting
 
     def get_attach_info(self, bus_id: str) -> Optional[AttachResult]:
         return self._attached.get(bus_id)
