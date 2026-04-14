@@ -367,10 +367,13 @@ if HAS_RUMPS:
                 ok="Add", cancel="Cancel",
             )
             r = w.run()
-            if r.clicked == 1 and r.text.strip():
+            if r.clicked and r.text.strip():
                 ip = r.text.strip()
-                entry = self.config.add_server(ip, 7576)
-                self._connect_server(entry)
+                if ip != "192.168.x.x":
+                    entry = self.config.add_server(ip, 7576)
+                    self.connections[ip] = ServerConnection(entry)
+                    self._connect_server(entry)
+                    self._schedule_rebuild()
 
         def _quick_add(self, server: DiscoveredServer):
             entry = self.config.add_server(server.ip, server.api_port, server.name)

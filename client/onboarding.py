@@ -53,6 +53,7 @@ class OnboardingWindow:
         self._discovered: list[DiscoveredServer] = []
         self._selected: Optional[DiscoveredServer] = None
         self._step = 0
+        self._next_btn_ref: Optional[tk.Button] = None
 
         self._build()
         self._discovery.start()
@@ -165,27 +166,20 @@ class OnboardingWindow:
                                      bg=BG, fg=ACCENT2, font=_f(11))
         self._scan_status.pack(pady=(8, 0))
 
-        # Server list container
-        list_frame = tk.Frame(self.container, bg=SURFACE)
-        list_frame.pack(fill=tk.X, padx=40, pady=(10, 0))
-        self._server_list_frame = list_frame
-        self._server_buttons: list[tuple[tk.Frame, tk.Label]] = []
+        # ── Nav buttons first (side=BOTTOM → always at bottom) ──────────────
+        self._next_btn_ref = self._nav_buttons(
+            back=self._show_welcome,
+            next_text="Connect →",
+            next_cmd=self._do_connect,
+            next_enabled=False,
+        )
 
-        # ── Populate servers already found before this step was shown ────────
-        # Discovery starts in __init__ (before the user reaches this step).
-        # Any servers found while the user was on the Welcome screen are in
-        # _discovered but their cards were never rendered because
-        # _server_list_frame didn't exist yet.  Render them now.
-        for server in list(self._discovered):
-            self._add_server_card(server)
+        # ── Manual IP row (pack before server list so it sits below it) ──────
+        manual_sep = tk.Frame(self.container, bg=BORDER, height=1)
+        manual_sep.pack(side=tk.BOTTOM, fill=tk.X, padx=40, pady=(14, 0))
 
-        # Separator
-        tk.Frame(self.container, bg=BORDER, height=1).pack(
-            fill=tk.X, padx=40, pady=14)
-
-        # Manual IP row
         manual = tk.Frame(self.container, bg=BG)
-        manual.pack(padx=40, fill=tk.X)
+        manual.pack(side=tk.BOTTOM, padx=40, fill=tk.X, pady=(0, 14))
 
         tk.Label(manual, text="Or enter IP manually:",
                  bg=BG, fg=MUTED, font=_f(11)).pack(side=tk.LEFT)
@@ -206,12 +200,15 @@ class OnboardingWindow:
                   font=_f(11, "bold"), padx=12, pady=5, cursor="hand2",
                   command=lambda: self._add_manual(self._ip_var.get())).pack(side=tk.LEFT)
 
-        self._next_btn_ref = self._nav_buttons(
-            back=self._show_welcome,
-            next_text="Connect →",
-            next_cmd=self._do_connect,
-            next_enabled=bool(self._selected),   # enabled if already selected
-        )
+        # ── Server list container (fills remaining space in the middle) ──────
+        list_frame = tk.Frame(self.container, bg=SURFACE)
+        list_frame.pack(fill=tk.X, padx=40, pady=(10, 0))
+        self._server_list_frame = list_frame
+        self._server_buttons: list[tuple[tk.Frame, tk.Label]] = []
+
+        # Populate servers already found while user was on the Welcome screen
+        for server in list(self._discovered):
+            self._add_server_card(server)
 
         self._animate_scan(0)
 
@@ -290,9 +287,12 @@ class OnboardingWindow:
                     pass
             dot.configure(fg=ACCENT, bg=SEL_BG)
             # Enable Connect button
-            if self._next_btn_ref:
-                self._next_btn_ref.configure(state=tk.NORMAL, bg=ACCENT,
-                                             fg="#0a0f1e")
+            if self._next_btn_ref is not None:
+                try:
+                    self._next_btn_ref.configure(state=tk.NORMAL, bg=ACCENT,
+                                                 fg="#0a0f1e")
+                except tk.TclError:
+                    pass
 
         for w in all_widgets:
             w.bind("<Button-1>", lambda e, s=server: select(s))
