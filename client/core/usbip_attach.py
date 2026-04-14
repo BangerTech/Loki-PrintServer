@@ -204,7 +204,6 @@ class _USBHelperBridge:
         return os.path.join(log_dir, "usb-helper.log")
 
     def start(self, server_ip: str, tcp_port: int,
-              vendor_id: str = "", product_id: str = "",
               manufacturer: str = "", product_name: str = "") -> Optional[str]:
         if _USBHelperBridge._starting:
             log.debug("loki-usb-helper already starting, skipping duplicate")
@@ -220,12 +219,10 @@ class _USBHelperBridge:
         helper_log = self._get_log_path()
 
         cmd = [helper, server_ip, str(tcp_port)]
-        if vendor_id and product_id:
-            cmd += [vendor_id, product_id,
-                    manufacturer or "BangerTECH",
+        if manufacturer or product_name:
+            cmd += [manufacturer or "BangerTECH",
                     product_name or "Loki Virtual Plotter"]
-            log.info("USB identity: VID=%s PID=%s %s %s",
-                     vendor_id, product_id, manufacturer, product_name)
+            log.info("USB identity: %s / %s", manufacturer, product_name)
 
         # Try 1: direct launch (works when AMFI is disabled)
         log.info("Starting loki-usb-helper: %s", " ".join(cmd))
@@ -253,14 +250,21 @@ class _USBHelperBridge:
 
         # Try 2: sudo via osascript (password dialog)
         if not self.device_path:
+            if self._proc and self._proc.poll() is None:
+                self._proc.terminate()
+                try:
+                    self._proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    self._proc.kill()
+                self._proc = None
             log.info("Requesting admin privileges for loki-usb-helper...")
             try:
                 escaped = helper.replace('"', '\\\\"')
                 extra_args = ""
-                if vendor_id and product_id:
+                if manufacturer or product_name:
                     mfr = (manufacturer or "BangerTECH").replace('"', '\\\\"')
                     prd = (product_name or "Loki Virtual Plotter").replace('"', '\\\\"')
-                    extra_args = f' {vendor_id} {product_id} \\"{mfr}\\" \\"{prd}\\"'
+                    extra_args = f' \\"{mfr}\\" \\"{prd}\\"'
                 osa_cmd = (
                     f'do shell script "\\"{escaped}\\" {server_ip} {tcp_port}'
                     f'{extra_args} '
@@ -510,8 +514,6 @@ class DeviceAttacher:
         usb_helper = _USBHelperBridge()
         device_path = usb_helper.start(
             server_ip, int(port),
-            vendor_id=info.get("vendor_id", ""),
-            product_id=info.get("product_id", ""),
             manufacturer=info.get("manufacturer", ""),
             product_name=info.get("product", ""),
         )

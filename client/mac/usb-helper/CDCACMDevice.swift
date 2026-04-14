@@ -23,14 +23,12 @@ final class CDCACMDevice: VirtualUSBDevice {
     ]
 
     init(serverHost: String, serverPort: Int, serialSuffix: String,
-         vendorID: UInt16? = nil, productID: UInt16? = nil,
          manufacturerName: String = "BangerTECH", productName: String = "Loki Virtual Plotter") {
         self.serverHost = serverHost
         self.serverPort = serverPort
 
         let desc = Self.buildDescriptors(
             serialSuffix: serialSuffix,
-            vid: vendorID, pid: productID,
             manufacturer: manufacturerName, product: productName
         )
         super.init(descriptors: desc)
@@ -163,11 +161,14 @@ final class CDCACMDevice: VirtualUSBDevice {
     // MARK: - USB descriptors for CDC-ACM
 
     private static func buildDescriptors(serialSuffix: String,
-                                          vid: UInt16? = nil, pid: UInt16? = nil,
                                           manufacturer: String = "BangerTECH",
                                           product: String = "Loki Virtual Plotter") -> USBDescriptors {
-        let actualVID = vid ?? 0x1D50  // OpenMoko fallback
-        let actualPID = pid ?? 0x614E
+        // MUST use a generic CDC-ACM compatible VID/PID here.
+        // Real device VID/PIDs (CH340 0x1A86, FTDI 0x0403, etc.) cause macOS
+        // to load device-specific drivers instead of AppleUSBACM, preventing
+        // /dev/cu.usbmodem* from being created.
+        let actualVID: UInt16 = 0x1D50  // OpenMoko — always CDC-ACM compatible
+        let actualPID: UInt16 = 0x614E
         let device: [UInt8] = [
             18,          // bLength
             0x01,        // bDescriptorType: DEVICE
