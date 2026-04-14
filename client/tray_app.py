@@ -557,4 +557,12 @@ def _launch_tray(config: LokiConfig):
 
 
 if __name__ == "__main__":
-    main()
+    import traceback, pathlib, datetime
+    try:
+        main()
+    except Exception:
+        log_dir = pathlib.Path.home() / "Library" / "Logs" / "Loki-Client"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"crash-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
+        log_file.write_text(traceback.format_exc())
+        raise

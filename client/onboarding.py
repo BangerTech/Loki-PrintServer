@@ -79,6 +79,19 @@ class OnboardingWindow:
         y = (self.root.winfo_screenheight() - 480) // 2
         self.root.geometry(f"560x480+{x}+{y}")
 
+        # On macOS the app runs as LSUIElement (background agent) so windows
+        # don't automatically come to the foreground. Force activation here.
+        import sys
+        if sys.platform == "darwin":
+            try:
+                from AppKit import NSApp
+                NSApp.activateIgnoringOtherApps_(True)
+            except Exception:
+                pass
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.after(500, lambda: self.root.attributes("-topmost", False))
+
         # Main container
         self.container = tk.Frame(self.root, bg=BG)
         self.container.pack(fill=tk.BOTH, expand=True)
