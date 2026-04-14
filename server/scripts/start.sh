@@ -19,19 +19,30 @@ rmmod usbip_core 2>/dev/null || true
 
 # Step 1: Bind native USB plotters to generic serial driver FIRST
 #   (before usbip_host is loaded, so nothing steals them)
+#   NOTE: Mimaki (0a50) is excluded — it uses a raw USB bridge via pyusb,
+#   NOT serial. Binding it to usbserial would block pyusb access.
 echo "[+] Binding native USB plotters to generic serial driver..."
 modprobe usbserial 2>/dev/null || true
-for VID_PID in "0a50 0001"; do  # Mimaki CG-SR
-    echo "$VID_PID" > /sys/bus/usb-serial/drivers/generic/new_id 2>/dev/null || true
-    echo "    Registered ${VID_PID} with usbserial"
-done
 
-# Re-probe plotter devices so usbserial claims them
+# Remove stale Mimaki usbserial registration from previous runs
+echo "0a50 0001" > /sys/bus/usb-serial/drivers/generic/remove_id 2>/dev/null || true
+
+# Re-probe NON-Mimaki plotter devices so usbserial claims them
 for dev in /sys/bus/usb/devices/[0-9]*-*; do
     [ -f "$dev/idVendor" ] || continue
     vid=$(cat "$dev/idVendor" 2>/dev/null)
     case "$vid" in
-        0a50|0b4d|0459|1949|2166)  # Mimaki, Graphtec, Silhouette, Cricut, Roland
+        0a50)
+            # Mimaki: unbind any kernel driver so pyusb can claim it
+            for intf in "$dev"/"$(basename $dev)":*; do
+                [ -d "$intf" ] || continue
+                if [ -e "$intf/driver" ]; then
+                    echo "$(basename $intf)" > "$intf/driver/unbind" 2>/dev/null || true
+                    echo "    Unbound kernel driver from $(basename $intf) (Mimaki)"
+                fi
+            done
+            ;;
+        0b4d|0459|1949|2166)  # Graphtec, Silhouette, Cricut, Roland
             echo 0 > "$dev/authorized" 2>/dev/null
             echo 1 > "$dev/authorized" 2>/dev/null
             echo "    Re-probed $(basename $dev) (VID $vid)"

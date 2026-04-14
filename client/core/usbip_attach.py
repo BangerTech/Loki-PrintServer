@@ -174,11 +174,12 @@ class _USBHelperBridge:
     Requires: macOS with SIP kext-signing disabled, ad-hoc signed binary.
     """
 
-    _starting = False  # class-level guard against concurrent starts
+    _starting_ports: set = set()  # guard against concurrent starts per port
 
     def __init__(self):
         self._proc: Optional[subprocess.Popen] = None
         self.device_path: Optional[str] = None
+        self._tcp_port: int = 0
 
     @staticmethod
     def find_helper() -> Optional[str]:
@@ -249,8 +250,8 @@ class _USBHelperBridge:
               manufacturer: str = "", product_name: str = "",
               device_name: str = "",
               usb_mode: str = "") -> Optional[str]:
-        if _USBHelperBridge._starting:
-            log.debug("loki-usb-helper already starting, skipping duplicate")
+        if tcp_port in _USBHelperBridge._starting_ports:
+            log.debug("loki-usb-helper already starting for port %s, skipping", tcp_port)
             return None
 
         helper = self.find_helper()
@@ -264,7 +265,8 @@ class _USBHelperBridge:
         mode = mode or "cdc"
 
         existing = set(glob.glob("/dev/cu.usbmodem*"))
-        _USBHelperBridge._starting = True
+        self._tcp_port = tcp_port
+        _USBHelperBridge._starting_ports.add(tcp_port)
         helper_log = self._get_log_path(tcp_port)
 
         serial_name = self._make_device_name(
@@ -341,7 +343,7 @@ class _USBHelperBridge:
                 )
             except Exception as e:
                 log.warning("loki-usb-helper sudo launch failed: %s", e)
-                _USBHelperBridge._starting = False
+                _USBHelperBridge._starting_ports.discard(tcp_port)
                 return None
 
             result = self._wait_for_device(existing, timeout=30, mode=mode)
@@ -351,7 +353,7 @@ class _USBHelperBridge:
 
         log.warning("loki-usb-helper: device did not appear (mode=%s)", mode)
         self.stop()
-        _USBHelperBridge._starting = False
+        _USBHelperBridge._starting_ports.discard(tcp_port)
         return None
 
     def _wait_for_device(self, existing: set, timeout: int = 15,
@@ -367,7 +369,7 @@ class _USBHelperBridge:
             if self._proc and self._proc.poll() is None:
                 self.device_path = "USB (vendor-specific)"
                 log.info("Vendor USB device helper running (no serial port)")
-                _USBHelperBridge._starting = False
+                _USBHelperBridge._starting_ports.discard(self._tcp_port)
                 return self.device_path
             return None
 
@@ -382,7 +384,7 @@ class _USBHelperBridge:
             if new_devices:
                 self.device_path = sorted(new_devices)[0]
                 log.info("Virtual USB device appeared: %s", self.device_path)
-                _USBHelperBridge._starting = False
+                _USBHelperBridge._starting_ports.discard(self._tcp_port)
                 return self.device_path
         return None
 
@@ -503,7 +505,7 @@ class DeviceAttacher:
 
     def is_attaching(self) -> bool:
         """True if a USB helper is currently waiting for user input (password dialog)."""
-        return _USBHelperBridge._starting
+        return bool(_USBHelperBridge._starting_ports)
 
     def get_attach_info(self, bus_id: str) -> Optional[AttachResult]:
         return self._attached.get(bus_id)

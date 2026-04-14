@@ -89,6 +89,8 @@ class USBBridge:
             import usb.core
             import usb.util
 
+            self._unbind_usbserial()
+
             dev = usb.core.find(idVendor=self.vid, idProduct=self.pid)
             if not dev:
                 return False
@@ -96,11 +98,26 @@ class USBBridge:
             try:
                 if dev.is_kernel_driver_active(0):
                     dev.detach_kernel_driver(0)
-                    logger.info("USB bridge: detached kernel driver")
-            except Exception:
+                    logger.info("USB bridge: detached kernel driver from interface 0")
+            except (usb.core.USBError, NotImplementedError):
                 pass
 
-            dev.set_configuration()
+            try:
+                dev.set_configuration()
+            except usb.core.USBError:
+                dev.reset()
+                import time
+                time.sleep(0.5)
+                dev = usb.core.find(idVendor=self.vid, idProduct=self.pid)
+                if not dev:
+                    return False
+                try:
+                    if dev.is_kernel_driver_active(0):
+                        dev.detach_kernel_driver(0)
+                except (usb.core.USBError, NotImplementedError):
+                    pass
+                dev.set_configuration()
+
             cfg = dev.get_active_configuration()
             intf = cfg[(0, 0)]
 
@@ -126,10 +143,52 @@ class USBBridge:
                 f"(EP OUT=0x{self._ep_out.bEndpointAddress:02X}, "
                 f"EP IN=0x{self._ep_in.bEndpointAddress:02X})"
             )
+
+            self._self_test()
             return True
         except Exception as e:
             logger.error(f"USB bridge: open failed: {e}")
             return False
+
+    def _self_test(self):
+        """Quick self-test: send OH; and check if plotter responds."""
+        import time
+        try:
+            r = self._dev.ctrl_transfer(0xC1, 0x0D, 0, 0, 4, timeout=2000)
+            logger.info(f"USB bridge self-test: status before = {bytes(r).hex()}")
+
+            self._ep_out.write(b"OH;", timeout=5000)
+            time.sleep(0.3)
+
+            r = self._dev.ctrl_transfer(0xC1, 0x0D, 0, 0, 4, timeout=2000)
+            status = bytes(r).hex()
+            logger.info(f"USB bridge self-test: status after OH; = {status}")
+
+            if status != "00000000":
+                data = self._ep_in.read(512, timeout=1000)
+                logger.info(
+                    f"USB bridge self-test: BULK IN = {bytes(data)!r} "
+                    f"*** PLOTTER RESPONDING ***"
+                )
+            else:
+                logger.warning(
+                    "USB bridge self-test: plotter NOT responding to OH;"
+                )
+        except Exception as e:
+            logger.warning(f"USB bridge self-test failed: {e}")
+
+    def _unbind_usbserial(self):
+        """Remove any usbserial_generic registration for our VID:PID."""
+        try:
+            remove_path = "/sys/bus/usb-serial/drivers/generic/remove_id"
+            remove_id = f"{self.vid:04x} {self.pid:04x}"
+            with open(remove_path, "w") as f:
+                f.write(remove_id)
+            logger.info(f"USB bridge: removed usbserial binding for {remove_id}")
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
 
     def _close_device(self):
         if self._dev:
@@ -190,6 +249,13 @@ class USBBridge:
         wLen = struct.unpack_from("<H", payload, 6)[0]
         data_out = payload[8:] if len(payload) > 8 else b""
 
+        is_status_poll = (bmRT == 0xC1 and bReq == 0x0D)
+        if not is_status_poll:
+            logger.debug(
+                f"USB bridge: CTRL bmRT=0x{bmRT:02X} bReq=0x{bReq:02X} "
+                f"wVal=0x{wVal:04X} wIdx=0x{wIdx:04X} wLen={wLen}"
+            )
+
         if not self._dev:
             return _frame(MSG_CTRL_RESP, bytes([STATUS_ERROR]))
 
@@ -198,14 +264,17 @@ class USBBridge:
 
             if bmRT & 0x80:
                 result = self._dev.ctrl_transfer(bmRT, bReq, wVal, wIdx, wLen, timeout=2000)
+                if not is_status_poll:
+                    logger.debug(f"USB bridge: CTRL IN → {len(result)}B")
                 return _frame(MSG_CTRL_RESP, bytes([STATUS_OK]) + bytes(result))
             else:
                 self._dev.ctrl_transfer(bmRT, bReq, wVal, wIdx, data_out, timeout=2000)
+                logger.debug(f"USB bridge: CTRL OUT → OK")
                 return _frame(MSG_CTRL_RESP, bytes([STATUS_OK]))
         except usb.core.USBError as e:
             if e.errno == 32:  # pipe error (STALL)
                 return _frame(MSG_CTRL_RESP, bytes([STATUS_STALL]))
-            logger.debug(f"USB bridge: control error: {e}")
+            logger.warning(f"USB bridge: control error: {e}")
             return _frame(MSG_CTRL_RESP, bytes([STATUS_ERROR]))
 
     def _handle_bulk_out(self, payload: bytes):
@@ -214,11 +283,12 @@ class USBBridge:
             return
         ep = payload[0]
         data = payload[1:]
+        logger.debug(f"USB bridge: BULK OUT ep=0x{ep:02X} {len(data)}B: {data[:40]!r}")
         try:
             if self._ep_out:
                 self._ep_out.write(data, timeout=5000)
         except Exception as e:
-            logger.debug(f"USB bridge: bulk OUT error: {e}")
+            logger.warning(f"USB bridge: bulk OUT error: {e}")
 
     def _handle_ping(self, payload: bytes) -> bytes:
         """Poll bulk IN endpoint and return any available data."""
@@ -232,11 +302,15 @@ class USBBridge:
             if self._ep_in:
                 data = self._ep_in.read(64, timeout=50)
                 if len(data) > 0:
+                    logger.debug(
+                        f"USB bridge: BULK IN ep=0x{ep:02X} → {len(data)}B: "
+                        f"{bytes(data)[:40]!r}"
+                    )
                     return _frame(MSG_PONG, bytes([ep]) + bytes(data))
         except usb.core.USBTimeoutError:
             pass
         except Exception as e:
-            logger.debug(f"USB bridge: bulk IN error: {e}")
+            logger.warning(f"USB bridge: bulk IN error: {e}")
 
         return _frame(MSG_PONG, bytes([ep]))
 

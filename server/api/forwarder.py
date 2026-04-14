@@ -120,7 +120,17 @@ class ForwardingManager:
 
         # 0) Raw USB bridge — for vendor-specific devices (e.g. Mimaki) where
         #    the host application uses direct IOKit USB access, not serial.
+        #    IMPORTANT: The bridge keeps the device open via pyusb (usbfs).
+        #    We must NEVER fall through to usbip/usbserial for these devices,
+        #    as that would steal the device from pyusb and break bulk transfers.
         if needs_raw_usb(vendor_id):
+            if state.serial_dev and state.serial_dev.startswith("usb-bridge:"):
+                logger.info(
+                    f"Raw USB bridge already active for {bus_id} on TCP:{state.serial_port}"
+                )
+                self.save_state()
+                return state
+
             port = self._next_serial_port
             self._next_serial_port += 1
             try:
@@ -140,6 +150,9 @@ class ForwardingManager:
                     return state
             except Exception as e:
                 logger.error(f"Raw USB bridge failed for {bus_id}: {e}")
+            # Do NOT fall through to serial/usbip — they would steal the device
+            self.save_state()
+            return state
 
         # 1) Serial forwarding — preferred for macOS clients (CDC-ACM bridge).
         #    USB/IP bind and usbserial are MUTUALLY EXCLUSIVE for the same
@@ -244,19 +257,29 @@ class ForwardingManager:
         state.usbip_shared = False
 
     async def _resolve_usbip_busid(self, bus_id: str) -> Optional[str]:
+        """Map a pyusb bus_id (bus-address) to the sysfs busid used by usbip.
+
+        Looks up the device's sysfs path by matching busnum/devnum from
+        /sys/bus/usb/devices/. Falls back to bus_id if no match found.
+        """
+        import glob
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "usbip", "list", "--local",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
-            for line in stdout.decode().splitlines():
-                m = re.search(r"busid\s+(\S+)", line)
-                if m:
-                    return m.group(1)
-        except Exception as e:
-            logger.error(f"usbip resolve failed: {e}")
+            bus, addr = bus_id.split("-", 1)
+        except ValueError:
+            return bus_id
+
+        for dev_path in glob.glob("/sys/bus/usb/devices/[0-9]*"):
+            try:
+                busnum = open(f"{dev_path}/busnum").read().strip()
+                devnum = open(f"{dev_path}/devnum").read().strip()
+            except (OSError, FileNotFoundError):
+                continue
+            if busnum == bus and devnum == addr:
+                sysfs_id = os.path.basename(dev_path)
+                logger.debug(f"Resolved {bus_id} → sysfs {sysfs_id}")
+                return sysfs_id
+
+        logger.warning(f"Could not resolve sysfs busid for {bus_id}, using as-is")
         return bus_id
 
     # ── Serial Forwarding ─────────────────────────────────────────────────────
