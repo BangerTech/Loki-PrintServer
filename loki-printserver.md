@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.0.0  
+**Version:** 1.2.1  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -313,6 +313,16 @@ Auf macOS erstellt der Loki-Client ein **echtes virtuelles USB CDC-ACM Gerät** 
 
 **Smart VID/PID:** Der USB-Helper erhält die echte Vendor-ID, Product-ID, Herstellername und Produktname vom Server. Er prüft eine Blockliste bekannter VIDs mit kollidierenden macOS-Treibern (CH340 `0x1A86`, FTDI `0x0403`, Prolific `0x067B`, CP210x `0x10C4`). Für blockierte VIDs wird eine generische CDC-ACM VID/PID verwendet (OpenMoko `0x1D50:0x614E`). Für alle anderen VIDs (z.B. Mimaki `0x0A50`) wird die echte VID/PID durchgereicht — damit erkennt Vendor-Software wie FineCut das Gerät automatisch.
 
+**Human-Readable Device Names:** Der virtuelle Port heißt `/dev/cu.usbmodem<DeviceName>1` statt einer generischen Nummer. Der Name wird aus `custom_name`, `manufacturer`+`product` oder dem Fallback `LOKI<port>` generiert und als USB Serial Number an macOS übergeben. Beispiel: `/dev/cu.usbmodemMIMAKICGSR1`.
+
+**CDC SERIAL_STATE Notification:** Der macOS AppleUSBACM-Treiber benötigt eine `SERIAL_STATE`-Benachrichtigung (USB CDC 1.1 §6.3.5) auf dem Interrupt-IN-Endpoint mit DCD+DSR-Bits, bevor er den Bulk-Datentransfer über EP 0x01/0x81 startet. Ohne diese Notification erkennt die Software zwar den Port, kann aber keine Daten senden/empfangen. Der Helper sendet diese Notification automatisch beim ersten Interrupt-Poll und bei jeder DTR-Änderung.
+
+**Datenfluss-Logging:** Der USB-Helper loggt den kompletten Datenpfad in `~/Library/Logs/Loki-Client/usb-helper.log`:
+- `CDC: sending SERIAL_STATE notification (DCD+DSR)` — Notification an macOS
+- `USB→TCP: N bytes` — Daten von der Schneidsoftware zum Plotter
+- `TCP recv: N bytes` — Antwort vom Plotter empfangen
+- `TCP→USB: N bytes` — Antwort an die Schneidsoftware übergeben
+
 **Fallback:** Wenn der USB-Helper nicht verfügbar ist oder fehlschlägt (z.B. AMFI nicht deaktiviert), wird automatisch auf den PTY-Bridge-Modus zurückgefallen (`/tmp/tty.loki-*`). Dieser funktioniert mit Software die manuelle Port-Eingabe erlaubt, wird aber von IOKit-basierten Programmen nicht erkannt.
 
 ---
@@ -331,16 +341,14 @@ git commit -m "fix: beschreibung der änderung"
 # 2. Auf main pushen
 git push origin main
 
-# 3. Altes Tag löschen (lokal + remote)
-git tag -d v1.0.0
-git push origin :refs/tags/v1.0.0
+# 3. Neues Tag setzen (Semver: Major.Minor.Patch)
+git tag v1.2.2
 
-# 4. Neues Tag setzen und pushen → startet GitHub Actions
-git tag -a v1.0.0 -m "v1.0.0"
-git push origin v1.0.0
+# 4. Tag pushen → startet GitHub Actions
+git push origin v1.2.2
 ```
 
-Der Push des Tags auf `v*.*.*` triggert `.github/workflows/release.yml` und baut alle drei Plattformen.
+Der Push eines Tags im Format `v*.*.*` triggert `.github/workflows/release.yml` und baut alle drei Plattformen.
 
 ### Was GitHub Actions automatisch macht
 
@@ -357,8 +365,8 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 
 - [ ] Alle geänderten Dateien committed (`git status` zeigt nichts Offenes)
 - [ ] `git push origin main` erfolgreich
-- [ ] Altes Tag lokal und remote gelöscht
-- [ ] Neues annotiertes Tag (`-a`) gesetzt und gepusht
+- [ ] Neues Tag mit inkrementierter Version gesetzt (z.B. `v1.2.1` → `v1.2.2`)
+- [ ] Tag gepusht (`git push origin v1.2.2`)
 - [ ] GitHub Actions unter https://github.com/BangerTech/Loki-PrintServer/actions prüfen ob der Workflow gestartet ist
 
 ---
@@ -398,6 +406,8 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 | "App ist beschädigt" | Gatekeeper-Quarantäne durch Browser-Download | `xattr -cr /Applications/Loki-Client.app` |
 | `Failed to create IOUSBHostControllerInterface` | AMFI blockiert Kernel-Zugang für USB-Helper | AMFI deaktivieren: `amfi_get_out_of_my_way=1` in boot-args (OpenCore: in config.plist) |
 | Kein `/dev/cu.usbmodem*` erscheint | VID/PID eines Geräts mit eigenem macOS-Treiber (CH340/FTDI) im Descriptor | Blockliste im Helper: CH340/FTDI/PL2303/CP210x → automatisch generische CDC-ACM VID/PID |
+| Port erkannt, aber Verbindungstest schlägt fehl | Fehlende CDC SERIAL_STATE Notification (DCD+DSR) auf Interrupt EP | Ab v1.2.1: Notification wird automatisch gesendet; `wMaxPacketSize` 10B, `bInterval` 16ms |
+| Vevor-Plotter zeigt generischen Portnamen | Blocklist-VID → generische VID/PID → macOS ignoriert Serial Number | Kosmetisch; xfcut funktioniert trotzdem. Mimaki/andere non-blocked VIDs haben korrekte Namen |
 | "Programm wird auf diesem Mac nicht unterstützt" | Falscher Build-Runner (arm64 statt x86_64) | `macos-15-intel` runner bestätigt x86_64 |
 | Bundle-Modifikationen nach PyInstaller | Post-build Info.plist/Datei-Kopien brechen Ad-hoc-Signatur | `info_plist={}` im `.spec`-`BUNDLE`-Block verwenden, keine Post-build-Patches |
 | `ValueError: not enough values to unpack` | `collect_all()` Ergebnisse per `+=` auf `a.datas` TOC-Objekt | `collect_all()` **vor** `Analysis()` aufrufen, Ergebnisse als Konstruktor-Parameter übergeben |
@@ -427,3 +437,5 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 || 2026-04 | — | Logging: `core/logger.py` — zentrales RotatingFileHandler-Logging (2 MB, 3 Backups). macOS: `~/Library/Logs/Loki-Client/loki-client.log`, Linux/Windows: `~/.config/loki-printserver/loki-client.log`. Alle Verbindungen, API-Calls, Discovery-Events, Attach/Detach und Fehler werden geloggt. |
 || 2026-04 | — | macOS Virtual USB: `loki-usb-helper` (Swift) erstellt echte virtuelle USB CDC-ACM Geräte über `IOUSBHostControllerInterface`. Erscheint als `/dev/cu.usbmodem*` — erkannt von FineCut, xfcut, etc. Benötigt AMFI disabled. Automatischer Fallback auf PTY-Bridge wenn nicht verfügbar. |
 || 2026-04 | — | Smart VID/PID: Blockliste für VIDs mit kollidierenden macOS-Treibern (CH340 0x1A86, FTDI 0x0403, Prolific 0x067B, CP210x 0x10C4) — für diese generische CDC-ACM VID/PID. Andere VIDs (z.B. Mimaki 0x0A50) werden durchgereicht → FineCut erkennt den Plotter automatisch. |
+|| 2026-04 | 1.2.0 | Human-Readable Device Names: `/dev/cu.usbmodemMIMAKICGSR1` statt `/dev/cu.usbmodemLOKI7581`. Name aus custom_name, manufacturer+product oder Fallback. Fix: Swift Kompilierfehler (`log()` in statischer Methode). |
+|| 2026-04 | 1.2.1 | Fix: CDC SERIAL_STATE Notification — FineCut erkannte den Port, aber Verbindungstest schlug fehl weil macOS nie DCD+DSR-Signal auf Interrupt-EP 0x82 bekam → Bulk-Datentransfer startete nicht. Interrupt-EP `wMaxPacketSize` 8→10 Bytes, `bInterval` 255→16ms. Data-Flow-Logging in usb-helper.log. |

@@ -16,7 +16,7 @@ final class CDCACMDevice: VirtualUSBDevice {
 
     // CDC serial line state
     private var dtrActive = false
-    private var serialStateChanged = true  // send initial state on first poll
+    private var serialStateChanged = false  // only send after DTR change (not during enumeration)
 
     // Default line coding: 9600 8N1
     private var lineCoding: [UInt8] = [
