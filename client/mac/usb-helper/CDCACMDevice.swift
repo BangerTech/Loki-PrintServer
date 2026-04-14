@@ -33,8 +33,18 @@ final class CDCACMDevice: VirtualUSBDevice {
         self.serverHost = serverHost
         self.serverPort = serverPort
 
+        // macOS AppleUSBACMData uses the USB serial number for the
+        // /dev/cu.usbmodem<serial><intf> name ONLY if it is ≤ 8 chars.
+        // Longer serials cause a fallback to location-ID naming.
+        var suffix = serialSuffix
+        if suffix.count > 8 {
+            let truncated = String(suffix.prefix(8))
+            print("[loki-usb] Serial suffix '\(suffix)' too long for macOS CDC naming (max 8), truncating to '\(truncated)'")
+            suffix = truncated
+        }
+
         let desc = Self.buildDescriptors(
-            serialSuffix: serialSuffix,
+            serialSuffix: suffix,
             vid: vendorID, pid: productID,
             manufacturer: manufacturerName, product: productName
         )

@@ -106,7 +106,8 @@ if mode == "vendor" {
         exit(1)
     }
 } else {
-    print("[loki-usb] Mode: CDC-ACM serial → /dev/cu.usbmodem\(deviceName)*")
+    let displayName = deviceName.count > 8 ? String(deviceName.prefix(8)) : deviceName
+    print("[loki-usb] Mode: CDC-ACM serial → /dev/cu.usbmodem\(displayName)*")
     let cdcDev = CDCACMDevice(
         serverHost: serverIP, serverPort: port, serialSuffix: deviceName,
         vendorID: vid, productID: pid,

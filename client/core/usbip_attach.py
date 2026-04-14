@@ -208,7 +208,12 @@ class _USBHelperBridge:
     @staticmethod
     def _make_device_name(device_name: str, manufacturer: str,
                           product_name: str, tcp_port: int) -> str:
-        """Build a sanitized device name for the /dev/cu.usbmodem<name> path."""
+        """Build a sanitized device name for the /dev/cu.usbmodem<name> path.
+
+        macOS AppleUSBACMData only uses the USB serial number for the
+        device name if it is <= 8 ASCII characters.  Longer strings
+        cause a fallback to location-ID naming (e.g. usbmodem89101).
+        """
         if device_name:
             raw = device_name
         elif manufacturer and product_name:
@@ -220,7 +225,13 @@ class _USBHelperBridge:
         else:
             return f"LOKI{tcp_port}"
         clean = re.sub(r"[^a-zA-Z0-9]", "", raw)
-        return clean if clean else f"LOKI{tcp_port}"
+        if not clean:
+            return f"LOKI{tcp_port}"
+        if len(clean) > 8:
+            log.info("Device name '%s' exceeds macOS 8-char CDC limit, "
+                     "truncating to '%s'", clean, clean[:8])
+            clean = clean[:8]
+        return clean
 
     @staticmethod
     def kill_stale_helpers():
