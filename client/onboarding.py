@@ -2,6 +2,7 @@
 Loki-PrintServer - Onboarding Window
 Shows on first launch. Discovers servers, lets user connect.
 """
+import logging
 import sys
 import threading
 import tkinter as tk
@@ -18,6 +19,8 @@ except ImportError:
 from core.api_client import LokiAPIClient
 from core.config import LokiConfig
 from core.discovery import DiscoveredServer, LokiDiscovery
+
+log = logging.getLogger("loki.onboarding")
 
 
 # ── Color palette ──────────────────────────────────────────────────────────────
@@ -47,6 +50,7 @@ class OnboardingWindow:
     """4-step onboarding wizard: Welcome → Discover → Connecting → Done."""
 
     def __init__(self, config: LokiConfig, on_complete: Callable[[LokiConfig], None]):
+        log.info("Onboarding window starting")
         self.config = config
         self.on_complete = on_complete
         self._discovery = LokiDiscovery(on_found=self._on_server_found)
@@ -57,6 +61,7 @@ class OnboardingWindow:
 
         self._build()
         self._discovery.start()
+        log.info("mDNS discovery started, entering mainloop")
         self.root.mainloop()
 
     # ── Window construction ────────────────────────────────────────────────────
@@ -228,6 +233,7 @@ class OnboardingWindow:
 
     def _on_server_found(self, server: DiscoveredServer):
         if server not in self._discovered:
+            log.info("Server discovered: %s (%s:%s)", server.name, server.ip, server.api_port)
             self._discovered.append(server)
             # Only render the card if the discover step is currently shown.
             # If we're still on Welcome, the card will be rendered when
@@ -306,6 +312,7 @@ class OnboardingWindow:
         ip = ip.strip()
         if not ip or ip == "192.168.x.x":
             return
+        log.info("Manual server check: %s", ip)
         if hasattr(self, "_scan_status"):
             self._scan_status.configure(text=f"⏳ Checking {ip}…", fg=MUTED)
 
@@ -315,6 +322,7 @@ class OnboardingWindow:
                 ok = client.check_health()
             except Exception:
                 ok = False
+            log.info("Manual check %s → %s", ip, "OK" if ok else "FAIL")
             if ok:
                 fake = DiscoveredServer(
                     name=ip, host=f"{ip}.", ip=ip,
@@ -342,6 +350,7 @@ class OnboardingWindow:
     def _show_connecting(self, server: DiscoveredServer):
         self._clear()
         self._step = 2
+        log.info("Connecting to %s:%s …", server.ip, server.api_port)
 
         tk.Label(self.container, text="Connecting…",
                  bg=BG, fg=TEXT, font=_f(20, "bold")).pack(pady=(60, 10))
@@ -356,11 +365,14 @@ class OnboardingWindow:
             client = LokiAPIClient(server.ip, server.api_port)
             ok = client.check_health()
             if ok:
+                log.info("Onboarding health check OK for %s", server.ip)
                 self.config.add_server(server.ip, server.api_port, server.name)
                 self.config.first_launch = False
                 self.config.save()
+                log.info("Config saved: servers=%s", [s.host for s in self.config.servers])
                 self.root.after(0, lambda: self._show_done(server, client))
             else:
+                log.warning("Onboarding health check FAILED for %s", server.ip)
                 self.root.after(0, lambda: self._conn_status.configure(
                     text="✗ Connection failed. Check IP and try again.",
                     fg=WARNING,
@@ -385,6 +397,8 @@ class OnboardingWindow:
         all_devices = client.list_devices()
         devices = [d for d in all_devices if not d.is_infrastructure]
         shared = sum(1 for d in devices if d.is_shared)
+        log.info("Done screen: %d devices (%d shared) on %s",
+                 len(devices), shared, server.ip)
 
         info = tk.Frame(self.container, bg=CARD, padx=20, pady=14)
         info.pack(padx=60, pady=18, fill=tk.X)
@@ -439,6 +453,7 @@ class OnboardingWindow:
         self._finish()
 
     def _finish(self):
+        log.info("Onboarding finished, closing window")
         self._discovery.stop()
         self.root.destroy()
         self.on_complete(self.config)

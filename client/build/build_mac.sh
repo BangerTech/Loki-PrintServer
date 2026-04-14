@@ -21,7 +21,7 @@ cd "$CLIENT"
 
 # ── 1. Dependencies ────────────────────────────────────────────────────────────
 echo "[1/5] Installing dependencies..."
-pip3 install --quiet pyinstaller pillow rumps zeroconf httpx websockets \
+pip3 install --quiet pyinstaller pillow rumps zeroconf websockets \
     customtkinter pystray packaging pyobjc-framework-Cocoa 2>&1 | grep -E "Successfully|already|ERROR" || true
 brew install create-dmg 2>/dev/null || true
 brew install socat 2>/dev/null || true

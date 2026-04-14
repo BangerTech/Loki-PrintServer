@@ -9,7 +9,7 @@ echo ==========================================
 cd /d "%~dp0\.."
 
 echo [+] Installing dependencies...
-pip install pyinstaller pillow pystray zeroconf httpx websockets customtkinter packaging
+pip install pyinstaller pillow pystray zeroconf websockets customtkinter packaging
 
 echo [+] Building .exe with PyInstaller...
 pyinstaller ^

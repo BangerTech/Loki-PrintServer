@@ -11,38 +11,35 @@ Features:
 """
 from __future__ import annotations
 
-import datetime
 import pathlib
 import sys
-import traceback
 
 # ── Early bootstrap for macOS .app bundles ──────────────────────────────────
 # In a PyInstaller .app with console=False, stdout/stderr can be None.
-# Any print/log call would then crash silently. Redirect to a log file first.
-_LOG_DIR = pathlib.Path.home() / "Library" / "Logs" / "Loki-Client"
-_log_fh = None
-
+# Redirect to a temp file so imports don't crash on print().
 if getattr(sys, "frozen", False) and sys.platform == "darwin":
-    _LOG_DIR.mkdir(parents=True, exist_ok=True)
-    _log_fh = open(  # noqa: SIM115
-        _LOG_DIR / "startup.log", "a", encoding="utf-8",
-    )
-    _log_fh.write(f"\n{'='*60}\n")
-    _log_fh.write(f"Loki-Client startup  {datetime.datetime.now()}\n")
-    _log_fh.flush()
+    _boot_log = pathlib.Path.home() / "Library" / "Logs" / "Loki-Client"
+    _boot_log.mkdir(parents=True, exist_ok=True)
+    _boot_fh = open(_boot_log / "startup.log", "a", encoding="utf-8")  # noqa: SIM115
     if sys.stdout is None:
-        sys.stdout = _log_fh
+        sys.stdout = _boot_fh
     if sys.stderr is None:
-        sys.stderr = _log_fh
+        sys.stderr = _boot_fh
 
 # ── Now safe to import everything else ──────────────────────────────────────
 import argparse  # noqa: E402
+import datetime  # noqa: E402
 import os  # noqa: E402
 import platform  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
+import traceback  # noqa: E402
 import webbrowser  # noqa: E402
 from typing import Optional  # noqa: E402
+
+from core.logger import setup_logging  # noqa: E402
+
+log = setup_logging()
 
 OS = platform.system()
 
@@ -111,6 +108,8 @@ class ServerConnection:
         self.error: Optional[str] = None
 
     def try_connect(self, retries: int = 3, delay: float = 2.0) -> bool:
+        log.info("Connecting to %s:%s (retries=%d, delay=%.1fs)",
+                 self.entry.host, self.entry.port, retries, delay)
         for attempt in range(retries):
             try:
                 c = LokiAPIClient(self.entry.host, self.entry.port)
@@ -118,14 +117,21 @@ class ServerConnection:
                     self.client = c
                     self.connected = True
                     self.error = None
+                    log.info("Connected to %s:%s (attempt %d/%d)",
+                             self.entry.host, self.entry.port, attempt + 1, retries)
                     return True
                 self.error = "Health check returned non-200"
+                log.warning("Health check failed for %s:%s (attempt %d/%d)",
+                            self.entry.host, self.entry.port, attempt + 1, retries)
             except Exception as e:
                 self.error = str(e)
+                log.warning("Connect attempt %d/%d to %s:%s failed: %s",
+                            attempt + 1, retries, self.entry.host, self.entry.port, e)
             if attempt < retries - 1:
                 time.sleep(delay)
         self.connected = False
-        print(f"[Loki] Connection to {self.entry.host}:{self.entry.port} failed: {self.error}")
+        log.error("All %d connection attempts to %s:%s failed: %s",
+                  retries, self.entry.host, self.entry.port, self.error)
         return False
 
     def refresh(self):
@@ -134,8 +140,9 @@ class ServerConnection:
         try:
             self.devices = self.client.list_devices()
             self.status = self.client.get_status()
+            log.debug("Refreshed %s: %d devices", self.entry.host, len(self.devices))
         except Exception as e:
-            print(f"[Loki] Refresh failed for {self.entry.host}: {e}")
+            log.error("Refresh failed for %s: %s", self.entry.host, e)
             self.connected = False
             self.client = None
 
@@ -186,26 +193,32 @@ if HAS_RUMPS:
         # ── Connection ────────────────────────────────────────────────────────
 
         def _connect_all(self):
+            log.info("Initial connection pass for %d server(s)", len(self.connections))
             time.sleep(1)
             for conn in list(self.connections.values()):
                 if not conn.connected:
                     conn.try_connect()
                     if conn.connected:
                         conn.refresh()
+            any_ok = any(c.connected for c in self.connections.values())
+            log.info("Initial connection pass done — any_connected=%s", any_ok)
             self._schedule_rebuild()
 
         def _connect_server(self, entry: ServerEntry):
             def _do():
+                log.info("Connecting to server %s (%s:%s)", entry.name, entry.host, entry.port)
                 conn = self.connections.setdefault(entry.host, ServerConnection(entry))
                 ok = conn.try_connect()
                 if ok:
                     conn.refresh()
+                    log.info("Server %s connected, %d device(s)", entry.name, len(conn.devices))
                     rumps.notification(
                         "Loki-PrintServer",
                         f"Connected: {entry.name}",
                         f"{len(conn.devices)} device(s) found"
                     )
                 else:
+                    log.warning("Server %s unreachable: %s", entry.name, conn.error)
                     rumps.notification(
                         "Loki-PrintServer",
                         f"Cannot reach {entry.name}",
@@ -217,16 +230,17 @@ if HAS_RUMPS:
 
         def _on_server_discovered(self, server: DiscoveredServer):
             key = server.ip
+            log.info("mDNS discovered server: %s (%s)", server.name, server.ip)
             if key in self.connections and self.connections[key].connected:
-                return  # already connected
+                log.debug("Already connected to %s, skipping", key)
+                return
 
-            # Auto-connect if in saved servers
             for entry in self.config.servers:
                 if entry.host == server.ip:
+                    log.info("Auto-connecting to saved server %s", server.ip)
                     self._connect_server(entry)
                     return
 
-            # New server found — notify user
             if self.config.show_notifications:
                 rumps.notification(
                     "Server found",
@@ -243,6 +257,8 @@ if HAS_RUMPS:
 
         def _rebuild_menu(self):
             any_connected = any(c.connected for c in self.connections.values())
+            log.debug("Rebuilding menu — %d server(s), any_connected=%s",
+                      len(self.connections), any_connected)
             self.icon = self._save_icon(any_connected)
             self.title = ""
 
@@ -344,21 +360,27 @@ if HAS_RUMPS:
         # ── Actions ───────────────────────────────────────────────────────────
 
         def _toggle_device(self, dev: DeviceInfo, conn: ServerConnection):
+            log.info("Toggle device %s (bus=%s)", dev.display_name, dev.bus_id)
             if dev.bus_id in self.attacher.get_attached():
                 self.attacher.detach(dev.bus_id)
+                log.info("Detached %s", dev.bus_id)
                 rumps.notification("Detached", dev.display_name, "")
             else:
                 self._share_and_attach(dev, conn)
 
         def _share_and_attach(self, dev: DeviceInfo, conn: ServerConnection):
             def _do():
+                log.info("Share & attach %s (bus=%s, host=%s)",
+                         dev.display_name, dev.bus_id, conn.entry.host)
                 fwd_info = dev.forward_info
                 if conn.client:
                     conn.client.share_device(dev.bus_id)
-                    # Fetch fresh forward_info after sharing
                     fwd_info = conn.client.get_forward_info(dev.bus_id) or fwd_info
+                log.debug("forward_info for %s: %s", dev.bus_id, fwd_info)
                 result = self.attacher.attach(conn.entry.host, dev.bus_id,
                                               forward_info=fwd_info)
+                log.info("Attach result: status=%s msg=%s dev=%s",
+                         result.status, result.message, result.local_device)
                 if result.status == AttachStatus.ATTACHED:
                     msg = dev.display_name
                     if result.local_device:
@@ -405,10 +427,14 @@ if HAS_RUMPS:
         def _poll(self, _=None):
             def _do():
                 for conn in list(self.connections.values()):
+                    was_connected = conn.connected
                     if not conn.connected:
                         conn.try_connect(retries=1)
                     if conn.connected:
                         conn.refresh()
+                    if conn.connected != was_connected:
+                        log.info("Connection state changed: %s → %s (host=%s)",
+                                 was_connected, conn.connected, conn.entry.host)
                 self._schedule_rebuild()
             threading.Thread(target=_do, daemon=True).start()
 
@@ -420,6 +446,7 @@ if HAS_RUMPS:
 
 class LokiPystrayApp:
     def __init__(self, config: LokiConfig):
+        log.info("LokiPystrayApp init with %d server(s)", len(config.servers))
         self.config = config
         self.attacher = DeviceAttacher()
         self.connections: dict[str, ServerConnection] = {}
@@ -442,6 +469,7 @@ class LokiPystrayApp:
         self._icon.run()
 
     def _connect_all(self):
+        log.info("pystray: initial connection pass")
         for conn in self.connections.values():
             conn.try_connect()
             if conn.connected:
@@ -449,6 +477,7 @@ class LokiPystrayApp:
         self._refresh_icon()
 
     def _on_server_discovered(self, server: DiscoveredServer):
+        log.info("pystray: mDNS discovered %s (%s)", server.name, server.ip)
         for entry in self.config.servers:
             if entry.host == server.ip:
                 if server.ip not in self.connections:
@@ -588,23 +617,34 @@ def main():
     parser.add_argument("--no-onboarding", action="store_true")
     args = parser.parse_args()
 
+    from core.logger import get_log_path
+    log.info("========== Loki-Client starting ==========")
+    log.info("Platform: %s  Python: %s  Frozen: %s",
+             OS, sys.version.split()[0], getattr(sys, "frozen", False))
+    log.info("Log file: %s", get_log_path())
+
     if not _acquire_lock():
-        print("Loki-Client is already running.")
+        log.warning("Another instance is already running, exiting.")
         sys.exit(0)
 
     config = LokiConfig.load()
+    log.info("Config loaded: first_launch=%s  servers=%s",
+             config.first_launch, [s.host for s in config.servers])
 
-    # Add CLI server if given
     if args.server:
         config.add_server(args.server, args.port)
         config.first_launch = False
+        log.info("CLI server added: %s:%s", args.server, args.port)
 
     need_onboarding = (config.first_launch or not config.servers) and not args.no_onboarding
+    log.info("Onboarding needed: %s", need_onboarding)
 
     if need_onboarding:
         from onboarding import OnboardingWindow
 
         def after_onboarding(updated_config: LokiConfig):
+            log.info("Onboarding completed, launching tray with %d server(s)",
+                     len(updated_config.servers))
             _launch_tray(updated_config)
 
         OnboardingWindow(config=config, on_complete=after_onboarding)
@@ -616,11 +656,14 @@ def _launch_tray(config: LokiConfig):
     import signal
     signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
 
+    log.info("Launching tray app (OS=%s, HAS_RUMPS=%s, HAS_PYSTRAY=%s)",
+             OS, HAS_RUMPS, HAS_PYSTRAY)
+
     if HAS_RUMPS and OS == "Darwin":
-        # Hide dock icon — app lives in the menu bar only
         try:
             from AppKit import NSApp, NSApplicationActivationPolicyAccessory
             NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+            log.debug("macOS dock icon hidden")
         except Exception:
             pass
         app = LokiMenuBarApp(config)
@@ -628,7 +671,7 @@ def _launch_tray(config: LokiConfig):
     elif HAS_PYSTRAY:
         LokiPystrayApp(config)
     else:
-        print("Install dependencies: pip install rumps pillow pystray")
+        log.error("No tray framework available")
         sys.exit(1)
 
 
@@ -636,10 +679,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception:
-        _LOG_DIR.mkdir(parents=True, exist_ok=True)
-        crash = _LOG_DIR / f"crash-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
-        crash.write_text(traceback.format_exc())
-        if _log_fh:
-            _log_fh.write(f"CRASH: {traceback.format_exc()}\n")
-            _log_fh.flush()
+        log.critical("CRASH: %s", traceback.format_exc())
         raise

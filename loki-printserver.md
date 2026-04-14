@@ -80,6 +80,7 @@ Client (Mac/Win/Linux)
 | `onboarding.py` | Onboarding-Wizard (4 Schritte, customtkinter); bringt sich via `NSApp.activateIgnoringOtherApps_` in den Vordergrund |
 | `core/api_client.py` | HTTP-Client für Server-API |
 | `core/config.py` | Server-Liste persistieren (`~/.config/loki-printserver/`) |
+| `core/logger.py` | Zentrales Logging (RotatingFileHandler, 2 MB, 3 Backups) |
 | `core/device_db.py` | USB-ID Datenbank (CH340, Plotter, Drucker, etc.) |
 | `core/discovery.py` | mDNS-Serversuche (Zeroconf) |
 | `core/usbip_attach.py` | Plattform-Attach: USB/IP + Serial + IPP |
@@ -345,7 +346,7 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 | pystray | Windows/Linux Tray |
 | customtkinter | Onboarding UI |
 | zeroconf | Server-Discovery |
-| httpx | API-Client |
+| urllib (stdlib) | API-Client (kein externes Paket) |
 | Pillow | Icon-Rendering |
 | pyobjc-framework-Cocoa | `NSApp.activateIgnoringOtherApps_` (macOS Fenster-Fokus) |
 | pyinstaller | macOS/Linux Bundle |
@@ -386,3 +387,4 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 || 2026-04 | — | macOS: Dock-Icon wird nach Onboarding via `NSApplicationActivationPolicyAccessory` versteckt. |
 || 2026-04 | — | Custom Device Names: Geräte können im Dashboard umbenannt werden (✏️). Name wird per `vendor_id:product_id` in `custom_names.json` persistiert und an Clients propagiert. |
 || 2026-04 | — | Onboarding zeigt nur echte Peripheriegeräte (Infrastructure-Filter). |
+|| 2026-04 | — | Logging: `core/logger.py` — zentrales RotatingFileHandler-Logging (2 MB, 3 Backups). macOS: `~/Library/Logs/Loki-Client/loki-client.log`, Linux/Windows: `~/.config/loki-printserver/loki-client.log`. Alle Verbindungen, API-Calls, Discovery-Events, Attach/Detach und Fehler werden geloggt. |
