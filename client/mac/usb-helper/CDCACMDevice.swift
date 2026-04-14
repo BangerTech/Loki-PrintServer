@@ -185,34 +185,16 @@ final class CDCACMDevice: VirtualUSBDevice {
 
     // MARK: - USB descriptors for CDC-ACM
 
-    // VIDs with third-party macOS kexts that conflict with CDC-ACM.
-    // When the device descriptor contains one of these, macOS loads the
-    // vendor-specific driver instead of AppleUSBACM → no /dev/cu.usbmodem*.
-    private static let blockedVIDs: Set<UInt16> = [
-        0x1A86,  // WCH (CH340/CH341)
-        0x0403,  // FTDI (FT232R, FT2232, etc.)
-        0x067B,  // Prolific (PL2303)
-        0x10C4,  // Silicon Labs (CP210x)
-    ]
-
     private static func buildDescriptors(serialSuffix: String,
                                           vid: UInt16? = nil, pid: UInt16? = nil,
                                           manufacturer: String = "BangerTECH",
                                           product: String = "Loki Virtual Plotter") -> USBDescriptors {
-        let actualVID: UInt16
-        let actualPID: UInt16
-
-        if let v = vid, let p = pid, !blockedVIDs.contains(v) {
-            actualVID = v
-            actualPID = p
-            print("[loki-usb] Using real VID/PID: 0x\(String(v, radix:16))/0x\(String(p, radix:16))")
-        } else {
-            actualVID = 0x1D50  // OpenMoko — generic CDC-ACM compatible
-            actualPID = 0x614E
-            if let v = vid, blockedVIDs.contains(v) {
-                print("[loki-usb] VID 0x\(String(v, radix:16)) has conflicting macOS driver, using generic VID/PID")
-            }
-        }
+        // Pass through real VID/PID. Third-party kexts (CH340 etc.) match on
+        // vendor-specific interface class 0xFF, not on VID alone. Our CDC-ACM
+        // device uses class 0x02, so the kexts should not claim it.
+        let actualVID = vid ?? 0x1D50
+        let actualPID = pid ?? 0x614E
+        print("[loki-usb] Using VID/PID: 0x\(String(actualVID, radix:16))/0x\(String(actualPID, radix:16))")
         let device: [UInt8] = [
             18,          // bLength
             0x01,        // bDescriptorType: DEVICE
