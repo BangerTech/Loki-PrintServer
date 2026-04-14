@@ -189,11 +189,25 @@ final class CDCACMDevice: VirtualUSBDevice {
                                           vid: UInt16? = nil, pid: UInt16? = nil,
                                           manufacturer: String = "BangerTECH",
                                           product: String = "Loki Virtual Plotter") -> USBDescriptors {
-        // Pass through real VID/PID. Third-party kexts (CH340 etc.) match on
-        // vendor-specific interface class 0xFF, not on VID alone. Our CDC-ACM
-        // device uses class 0x02, so the kexts should not claim it.
-        let actualVID = vid ?? 0x1D50
-        let actualPID = pid ?? 0x614E
+        // VIDs with known macOS kext conflicts: these kexts match on VID:PID
+        // regardless of interface class, stealing the device from AppleUSBACMData.
+        // Use generic CDC-ACM VID/PID (OpenMoko) for these.
+        let blockedVIDs: Set<UInt16> = [
+            0x1A86,  // WCH CH340/CH341 (Vevor, generic Chinese plotters)
+            0x0403,  // FTDI
+            0x067B,  // Prolific PL2303
+            0x10C4,  // Silicon Labs CP210x
+        ]
+        let actualVID: UInt16
+        let actualPID: UInt16
+        if let v = vid, blockedVIDs.contains(v) {
+            actualVID = 0x1D50  // OpenMoko (generic, no kext conflicts)
+            actualPID = 0x614E
+            print("[loki-usb] VID 0x\(String(v, radix:16)) has kext conflict, using generic 0x1d50/0x614e")
+        } else {
+            actualVID = vid ?? 0x1D50
+            actualPID = pid ?? 0x614E
+        }
         print("[loki-usb] Using VID/PID: 0x\(String(actualVID, radix:16))/0x\(String(actualPID, radix:16))")
         let device: [UInt8] = [
             18,          // bLength
