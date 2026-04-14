@@ -175,10 +175,19 @@ if HAS_RUMPS:
                 self.connections[entry.host] = ServerConnection(entry)
 
             self.discovery.start()
+            self._needs_rebuild = False
             self._rebuild_menu()
 
             self._poll_timer = rumps.Timer(self._poll, 5)
             self._poll_timer.start()
+
+            # Dedicated main-thread timer that flushes rebuild requests from
+            # background threads. rumps.Timer must fire on the main thread —
+            # creating new timers from background threads (old _schedule_rebuild)
+            # results in NSTimers that never fire, keeping the menu stuck on
+            # the initial "Offline" state even after a successful connection.
+            self._rebuild_timer = rumps.Timer(self._flush_rebuild, 0.5)
+            self._rebuild_timer.start()
 
             threading.Thread(target=self._connect_all, daemon=True).start()
 
@@ -250,9 +259,15 @@ if HAS_RUMPS:
         # ── Menu ─────────────────────────────────────────────────────────────
 
         def _schedule_rebuild(self):
-            # rumps menu updates must happen on main thread via timer trick
-            t = rumps.Timer(lambda _: (self._rebuild_menu(), t.stop()), 0.1)
-            t.start()
+            # Set a flag — picked up by _flush_rebuild on the main thread.
+            # Do NOT create new rumps.Timer here: timers created from background
+            # threads are NSTimers not scheduled on the main run loop and never fire.
+            self._needs_rebuild = True
+
+        def _flush_rebuild(self, _=None):
+            if self._needs_rebuild:
+                self._needs_rebuild = False
+                self._rebuild_menu()
 
         def _rebuild_menu(self):
             any_connected = any(c.connected for c in self.connections.values())
