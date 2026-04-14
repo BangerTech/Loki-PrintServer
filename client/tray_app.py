@@ -557,7 +557,9 @@ def _launch_tray(config: LokiConfig):
 
 
 if __name__ == "__main__":
-    import traceback, pathlib, datetime
+    import traceback
+    import pathlib
+    import datetime
     try:
         main()
     except Exception:
