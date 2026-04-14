@@ -3,7 +3,7 @@ Loki-Client — Platform-specific USB Device Attachment
 Supports three methods depending on platform and device type:
 
   1. USB/IP  — Full USB passthrough (Linux native, Windows via usbip-win)
-  2. Serial  — TCP-to-virtual-serial bridge (macOS socat, Windows com0com)
+  2. Serial  — TCP-to-virtual-serial bridge (pure Python PTY, no socat needed)
   3. IPP     — Network printer via CUPS/Bonjour (macOS & Linux auto-discover)
 """
 import glob
@@ -11,14 +11,17 @@ import logging
 import os
 import platform
 import re
+import select
 import shutil
+import socket
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-logger = logging.getLogger("loki-client.attach")
+log = logging.getLogger("loki.attach")
 
 OS = platform.system()  # "Linux", "Windows", "Darwin"
 
@@ -48,11 +51,102 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
 
 
+class _PtyBridge:
+    """
+    Pure-Python TCP → PTY bridge for macOS/Linux serial devices.
+    No external tools (socat, etc.) required — uses only stdlib.
+
+    Creates a PTY pair, symlinks the slave to a predictable path in /tmp,
+    and forwards data between the PTY master and a TCP socket in a daemon thread.
+    """
+
+    def __init__(self):
+        self._master_fd: Optional[int] = None
+        self._slave_fd: Optional[int] = None
+        self._sock: Optional[socket.socket] = None
+        self._running = False
+        self.device_path: Optional[str] = None
+
+    def start(self, server_ip: str, tcp_port: int, link: str) -> str:
+        """
+        Connect to server_ip:tcp_port and expose as a PTY at `link`.
+        Returns the path to use in cutting/printing software.
+        """
+        import pty as _pty
+        self._master_fd, self._slave_fd = _pty.openpty()
+        slave_name = os.ttyname(self._slave_fd)
+        log.info("PTY bridge: slave=%s link=%s tcp=%s:%s",
+                 slave_name, link, server_ip, tcp_port)
+
+        # Symlink to a predictable /tmp path (no root needed)
+        try:
+            if os.path.islink(link) or os.path.exists(link):
+                os.unlink(link)
+            os.symlink(slave_name, link)
+            self.device_path = link
+        except OSError:
+            self.device_path = slave_name
+
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.settimeout(10)
+        self._sock.connect((server_ip, tcp_port))
+        self._sock.settimeout(None)
+        self._running = True
+        threading.Thread(target=self._loop, daemon=True, name="loki-pty-bridge").start()
+        return self.device_path
+
+    def _loop(self):
+        sock_fd = self._sock.fileno()
+        while self._running:
+            try:
+                r, _, _ = select.select([self._master_fd, sock_fd], [], [], 2.0)
+                for fd in r:
+                    if fd == self._master_fd:
+                        data = os.read(self._master_fd, 4096)
+                        self._sock.sendall(data)
+                    else:
+                        data = self._sock.recv(4096)
+                        if not data:
+                            log.info("PTY bridge: server closed connection")
+                            self._running = False
+                            break
+                        os.write(self._master_fd, data)
+            except Exception as e:
+                log.debug("PTY bridge loop ended: %s", e)
+                break
+        self._cleanup()
+
+    def stop(self):
+        self._running = False
+
+    def _cleanup(self):
+        for fd in (self._master_fd, self._slave_fd):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        self._master_fd = self._slave_fd = None
+        if self._sock:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+        if self.device_path and os.path.islink(self.device_path):
+            try:
+                os.unlink(self.device_path)
+            except OSError:
+                pass
+        log.info("PTY bridge cleaned up: %s", self.device_path)
+
+
 class DeviceAttacher:
     """Manages local attachment of remote USB devices using the best method."""
 
     def __init__(self):
         self._attached: dict[str, AttachResult] = {}  # bus_id -> result
+        self._bridges: dict[str, _PtyBridge] = {}     # bus_id -> active bridge
 
     def attach(self, server_ip: str, bus_id: str,
                forward_info: Optional[dict] = None) -> AttachResult:
@@ -77,7 +171,7 @@ class DeviceAttacher:
             if has_usbip:
                 result = self._attach_usbip_linux(server_ip, bus_id)
             if (not result or result.status != AttachStatus.ATTACHED) and has_serial:
-                result = self._attach_serial_linux(server_ip, serial_info)
+                result = self._attach_serial_linux(server_ip, serial_info, bus_id)
             if (not result or result.status != AttachStatus.ATTACHED) and has_ipp:
                 result = self._attach_ipp_linux(server_ip, ipp_info)
 
@@ -92,7 +186,7 @@ class DeviceAttacher:
         elif OS == "Darwin":
             # macOS: Serial for plotters/serial, IPP for printers, USB/IP via Lima
             if has_serial:
-                result = self._attach_serial_macos(server_ip, serial_info)
+                result = self._attach_serial_macos(server_ip, serial_info, bus_id)
             if (not result or result.status != AttachStatus.ATTACHED) and has_ipp:
                 result = self._attach_ipp_macos(server_ip, ipp_info)
             if (not result or result.status != AttachStatus.ATTACHED) and has_usbip:
@@ -209,74 +303,59 @@ class DeviceAttacher:
     #  Serial-over-TCP
     # ══════════════════════════════════════════════════════════════════════════
 
-    def _attach_serial_macos(self, server_ip: str, serial_info: dict) -> AttachResult:
+    def _attach_serial_macos(self, server_ip: str, serial_info: dict,
+                             bus_id: str = "") -> AttachResult:
         port = serial_info.get("port")
         if not port:
             return AttachResult(AttachStatus.ERROR, message="No serial port info from server")
 
-        if not shutil.which("socat"):
-            return AttachResult(
-                AttachStatus.ERROR,
-                message="socat not installed.\nInstall: brew install socat"
-            )
+        link = f"/tmp/tty.loki-plotter-{port}"
+        log.info("Serial attach: %s:%s → %s", server_ip, port, link)
 
-        pty_path = f"/tmp/tty.loki-plotter-{port}"
-
-        # socat creates a virtual serial port linked to the TCP stream
-        proc = subprocess.Popen([
-            "socat",
-            f"pty,raw,echo=0,link={pty_path},mode=666",
-            f"tcp:{server_ip}:{port}",
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-        time.sleep(1)
-        if proc.poll() is not None:
-            err = proc.stderr.read().decode().strip()
-            return AttachResult(AttachStatus.ERROR, message=f"socat failed: {err}")
-
-        # Also create a symlink in /dev/ for convenience
-        dev_link = f"/dev/tty.loki-{port}"
+        # ── Pure-Python PTY bridge (no external tools needed) ─────────────────
+        bridge = _PtyBridge()
         try:
-            if os.path.exists(dev_link):
-                os.remove(dev_link)
-            os.symlink(pty_path, dev_link)
-        except OSError:
-            dev_link = pty_path
+            device_path = bridge.start(server_ip, int(port), link)
+        except Exception as e:
+            log.error("PTY bridge start failed: %s", e)
+            return AttachResult(AttachStatus.ERROR,
+                                message=f"Serial bridge failed: {e}")
+
+        if bus_id:
+            self._bridges[bus_id] = bridge
 
         return AttachResult(
             AttachStatus.ATTACHED, AttachMethod.SERIAL,
-            f"Virtual serial port created.\n\n"
-            f"Use this device in your cutting/printing software:\n"
-            f"  {dev_link}\n\n"
-            f"Works with: xfcut, Silhouette Studio, Inkcut, etc.",
-            local_device=dev_link,
+            f"Plotter ready!\n\n"
+            f"Use this port in your cutting software:\n"
+            f"  {device_path}\n\n"
+            f"Works with: Inkcut, Silhouette Studio, CorelDRAW, etc.",
+            local_device=device_path,
         )
 
-    def _attach_serial_linux(self, server_ip: str, serial_info: dict) -> AttachResult:
+    def _attach_serial_linux(self, server_ip: str, serial_info: dict,
+                             bus_id: str = "") -> AttachResult:
         port = serial_info.get("port")
         if not port:
             return AttachResult(AttachStatus.ERROR, message="No serial port info from server")
 
-        if not shutil.which("socat"):
-            return AttachResult(AttachStatus.ERROR,
-                                message="socat not installed. Install: sudo apt install socat")
+        link = f"/tmp/tty.loki-plotter-{port}"
+        log.info("Serial attach (Linux): %s:%s → %s", server_ip, port, link)
 
-        pty_path = f"/dev/ttyLOKI{port}"
-        proc = subprocess.Popen([
-            "socat",
-            f"pty,raw,echo=0,link={pty_path},mode=666",
-            f"tcp:{server_ip}:{port}",
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        bridge = _PtyBridge()
+        try:
+            device_path = bridge.start(server_ip, int(port), link)
+        except Exception as e:
+            log.error("PTY bridge start failed: %s", e)
+            return AttachResult(AttachStatus.ERROR, message=f"Serial bridge failed: {e}")
 
-        time.sleep(1)
-        if proc.poll() is not None:
-            err = proc.stderr.read().decode().strip()
-            return AttachResult(AttachStatus.ERROR, message=f"socat failed: {err}")
+        if bus_id:
+            self._bridges[bus_id] = bridge
 
         return AttachResult(
             AttachStatus.ATTACHED, AttachMethod.SERIAL,
-            f"Virtual serial port: {pty_path}",
-            local_device=pty_path,
+            f"Virtual serial port: {device_path}",
+            local_device=device_path,
         )
 
     def _attach_serial_windows(self, server_ip: str, serial_info: dict) -> AttachResult:
@@ -310,9 +389,12 @@ class DeviceAttacher:
         )
 
     def _detach_serial(self, bus_id: str) -> AttachResult:
-        # Kill any socat processes for this device
+        bridge = self._bridges.pop(bus_id, None)
+        if bridge:
+            bridge.stop()
+            log.info("PTY bridge stopped for %s", bus_id)
+        # Also kill any residual socat processes
         if OS in ("Linux", "Darwin"):
-            _run(["pkill", "-f", f"loki.*{bus_id}"])
             _run(["pkill", "-f", "tty.loki"])
         return AttachResult(AttachStatus.DETACHED, message="Serial bridge stopped")
 

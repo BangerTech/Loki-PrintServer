@@ -200,6 +200,28 @@ if HAS_RUMPS:
 
         # ── Connection ────────────────────────────────────────────────────────
 
+        def _auto_attach_shared(self, conn: ServerConnection):
+            """Automatically attach every device the server has already shared."""
+            already = set(self.attacher.get_attached())
+            for dev in conn.devices:
+                if dev.is_infrastructure or dev.bus_id in already:
+                    continue
+                if not dev.is_shared:
+                    continue
+                log.info("Auto-attaching shared device %s (bus=%s)",
+                         dev.display_name, dev.bus_id)
+                fwd = dev.forward_info
+                if conn.client and not fwd:
+                    fwd = conn.client.get_forward_info(dev.bus_id) or {}
+                result = self.attacher.attach(
+                    conn.entry.host, dev.bus_id, forward_info=fwd)
+                if result.status == AttachStatus.ATTACHED:
+                    log.info("Auto-attached %s → %s",
+                             dev.bus_id, result.local_device)
+                else:
+                    log.warning("Auto-attach failed %s: %s",
+                                dev.bus_id, result.message)
+
         def _connect_all(self):
             log.info("Initial connection pass for %d server(s)", len(self.connections))
             time.sleep(1)
@@ -208,6 +230,7 @@ if HAS_RUMPS:
                     conn.try_connect()
                     if conn.connected:
                         conn.refresh()
+                        self._auto_attach_shared(conn)
             any_ok = any(c.connected for c in self.connections.values())
             log.info("Initial connection pass done — any_connected=%s", any_ok)
             self._schedule_rebuild()
@@ -220,6 +243,7 @@ if HAS_RUMPS:
                 if ok:
                     conn.refresh()
                     log.info("Server %s connected, %d device(s)", entry.name, len(conn.devices))
+                    self._auto_attach_shared(conn)
                     rumps.notification(
                         "Loki-PrintServer",
                         f"Connected: {entry.name}",
@@ -446,6 +470,7 @@ if HAS_RUMPS:
                         conn.try_connect(retries=1)
                     if conn.connected:
                         conn.refresh()
+                        self._auto_attach_shared(conn)
                     if conn.connected != was_connected:
                         log.info("Connection state changed: %s → %s (host=%s)",
                                  was_connected, conn.connected, conn.entry.host)
@@ -482,12 +507,26 @@ class LokiPystrayApp:
         threading.Thread(target=self._poll_loop, daemon=True).start()
         self._icon.run()
 
+    def _auto_attach_shared(self, conn: ServerConnection):
+        already = set(self.attacher.get_attached())
+        for dev in conn.devices:
+            if dev.is_infrastructure or dev.bus_id in already or not dev.is_shared:
+                continue
+            log.info("pystray auto-attaching %s (bus=%s)", dev.display_name, dev.bus_id)
+            fwd = dev.forward_info
+            if conn.client and not fwd:
+                fwd = conn.client.get_forward_info(dev.bus_id) or {}
+            result = self.attacher.attach(conn.entry.host, dev.bus_id, forward_info=fwd)
+            log.info("pystray auto-attach %s → %s (%s)",
+                     dev.bus_id, result.status, result.local_device)
+
     def _connect_all(self):
         log.info("pystray: initial connection pass")
         for conn in self.connections.values():
             conn.try_connect()
             if conn.connected:
                 conn.refresh()
+                self._auto_attach_shared(conn)
         self._refresh_icon()
 
     def _on_server_discovered(self, server: DiscoveredServer):
@@ -589,6 +628,7 @@ class LokiPystrayApp:
                     conn.try_connect()
                 if conn.connected:
                     conn.refresh()
+                    self._auto_attach_shared(conn)
             self._refresh_icon()
             time.sleep(5)
 
