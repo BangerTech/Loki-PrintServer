@@ -276,7 +276,7 @@ final class CDCACMDevice: VirtualUSBDevice {
             configuration: config,
             manufacturer: manufacturer,
             product: product,
-            serialNumber: "LOKI\(serialSuffix)"
+            serialNumber: serialSuffix
         )
     }
 }

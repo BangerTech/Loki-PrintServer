@@ -63,12 +63,13 @@ except ImportError:
 
 
 def _usb_info(dev: DeviceInfo) -> dict:
-    """Extract USB identity fields for VID/PID spoofing in the virtual USB helper."""
+    """Extract USB identity fields for the virtual USB helper."""
     return {
         "vendor_id": dev.vendor_id,
         "product_id": dev.product_id,
         "manufacturer": dev.manufacturer or "",
         "product": dev.product or "",
+        "device_name": dev.custom_name or "",
     }
 
 

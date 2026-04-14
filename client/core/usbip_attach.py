@@ -203,9 +203,27 @@ class _USBHelperBridge:
         os.makedirs(log_dir, exist_ok=True)
         return os.path.join(log_dir, "usb-helper.log")
 
+    @staticmethod
+    def _make_device_name(device_name: str, manufacturer: str,
+                          product_name: str, tcp_port: int) -> str:
+        """Build a sanitized device name for the /dev/cu.usbmodem<name> path."""
+        if device_name:
+            raw = device_name
+        elif manufacturer and product_name:
+            raw = f"{manufacturer}{product_name}"
+        elif product_name:
+            raw = product_name
+        elif manufacturer:
+            raw = manufacturer
+        else:
+            return f"LOKI{tcp_port}"
+        clean = re.sub(r"[^a-zA-Z0-9]", "", raw)
+        return clean if clean else f"LOKI{tcp_port}"
+
     def start(self, server_ip: str, tcp_port: int,
               vendor_id: str = "", product_id: str = "",
-              manufacturer: str = "", product_name: str = "") -> Optional[str]:
+              manufacturer: str = "", product_name: str = "",
+              device_name: str = "") -> Optional[str]:
         if _USBHelperBridge._starting:
             log.debug("loki-usb-helper already starting, skipping duplicate")
             return None
@@ -219,13 +237,24 @@ class _USBHelperBridge:
         _USBHelperBridge._starting = True
         helper_log = self._get_log_path()
 
+        serial_name = self._make_device_name(
+            device_name, manufacturer, product_name, tcp_port)
+
         cmd = [helper, server_ip, str(tcp_port)]
         if vendor_id and product_id:
             cmd += [vendor_id, product_id,
                     manufacturer or "BangerTECH",
-                    product_name or "Loki Virtual Plotter"]
-            log.info("USB identity: VID=%s PID=%s %s / %s",
-                     vendor_id, product_id, manufacturer, product_name)
+                    product_name or "Loki Virtual Plotter",
+                    serial_name]
+            log.info("USB identity: VID=%s PID=%s %s / %s → %s",
+                     vendor_id, product_id, manufacturer, product_name, serial_name)
+        elif manufacturer or product_name:
+            cmd += ["0000", "0000",
+                    manufacturer or "BangerTECH",
+                    product_name or "Loki Virtual Plotter",
+                    serial_name]
+            log.info("USB identity: %s / %s → %s",
+                     manufacturer, product_name, serial_name)
 
         # Try 1: direct launch (works when AMFI is disabled)
         log.info("Starting loki-usb-helper: %s", " ".join(cmd))
@@ -264,10 +293,12 @@ class _USBHelperBridge:
             try:
                 escaped = helper.replace('"', '\\\\"')
                 extra_args = ""
-                if vendor_id and product_id:
+                vid_arg = vendor_id if (vendor_id and product_id) else "0000"
+                pid_arg = product_id if (vendor_id and product_id) else "0000"
+                if manufacturer or product_name or device_name:
                     mfr = (manufacturer or "BangerTECH").replace('"', '\\\\"')
                     prd = (product_name or "Loki Virtual Plotter").replace('"', '\\\\"')
-                    extra_args = f' {vendor_id} {product_id} \\"{mfr}\\" \\"{prd}\\"'
+                    extra_args = f' {vid_arg} {pid_arg} \\"{mfr}\\" \\"{prd}\\" {serial_name}'
                 osa_cmd = (
                     f'do shell script "\\"{escaped}\\" {server_ip} {tcp_port}'
                     f'{extra_args} '
@@ -521,6 +552,7 @@ class DeviceAttacher:
             product_id=info.get("product_id", ""),
             manufacturer=info.get("manufacturer", ""),
             product_name=info.get("product", ""),
+            device_name=info.get("device_name", ""),
         )
         if device_path:
             if bus_id:
