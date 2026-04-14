@@ -188,15 +188,29 @@ echo "    ${APPNAME}.app ready."
 
 # ── 5. Re-sign USB helper inside the bundle (preserve entitlements) ────────────
 echo "[5/6] Re-signing loki-usb-helper in bundle..."
-BUNDLE_HELPER="dist/${APPNAME}.app/Contents/MacOS/loki-usb-helper"
-if [ -f "$BUNDLE_HELPER" ]; then
+BUNDLE_HELPER=""
+for candidate in \
+    "dist/${APPNAME}.app/Contents/MacOS/loki-usb-helper" \
+    "dist/${APPNAME}.app/Contents/Frameworks/loki-usb-helper" \
+    "dist/${APPNAME}.app/Contents/Resources/loki-usb-helper"; do
+    if [ -f "$candidate" ]; then
+        BUNDLE_HELPER="$candidate"
+        break
+    fi
+done
+
+if [ -n "$BUNDLE_HELPER" ]; then
+    echo "    Found helper at: $BUNDLE_HELPER"
     codesign --force --sign - \
         --entitlements "$USB_HELPER_DIR/entitlements.plist" \
         "$BUNDLE_HELPER" \
     && echo "    loki-usb-helper re-signed with entitlements" \
     || echo "    WARNING: re-signing failed"
+    echo "    Verifying entitlements:"
+    codesign -d --entitlements - "$BUNDLE_HELPER" 2>/dev/null | head -5
 else
     echo "    loki-usb-helper not in bundle (build skipped or failed)"
+    echo "    Searched in: MacOS/, Frameworks/, Resources/"
 fi
 
 # ── 6. DMG ─────────────────────────────────────────────────────────────────────

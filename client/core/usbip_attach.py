@@ -185,6 +185,7 @@ class _USBHelperBridge:
         if getattr(sys, "frozen", False):
             bundle_dir = os.path.dirname(sys.executable)
             candidates.append(os.path.join(bundle_dir, "loki-usb-helper"))
+            candidates.append(os.path.join(bundle_dir, "..", "Frameworks", "loki-usb-helper"))
             candidates.append(os.path.join(bundle_dir, "..", "Resources", "loki-usb-helper"))
         script_dir = os.path.dirname(os.path.abspath(__file__))
         candidates.append(os.path.join(script_dir, "..", "mac", "usb-helper", "loki-usb-helper"))
@@ -202,11 +203,17 @@ class _USBHelperBridge:
             return None
 
         existing = set(glob.glob("/dev/cu.usbmodem*"))
-        log.info("Starting loki-usb-helper: %s %s %s", helper, server_ip, tcp_port)
+
+        log.info("Starting loki-usb-helper (sudo): %s %s %s", helper, server_ip, tcp_port)
 
         try:
+            escaped = helper.replace('"', '\\\\"')
+            osa_cmd = (
+                f'do shell script "\\"{escaped}\\" {server_ip} {tcp_port} &" '
+                f'with administrator privileges'
+            )
             self._proc = subprocess.Popen(
-                [helper, server_ip, str(tcp_port)],
+                ["osascript", "-e", osa_cmd],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
         except Exception as e:
@@ -216,11 +223,12 @@ class _USBHelperBridge:
         for _ in range(30):
             time.sleep(0.5)
             if self._proc.poll() is not None:
-                stderr = self._proc.stderr.read().decode(errors="replace") if self._proc.stderr else ""
-                log.warning("loki-usb-helper exited early (rc=%s): %s",
-                            self._proc.returncode, stderr[:500])
-                self._proc = None
-                return None
+                rc = self._proc.returncode
+                if rc != 0:
+                    stderr = self._proc.stderr.read().decode(errors="replace") if self._proc.stderr else ""
+                    log.warning("loki-usb-helper exited early (rc=%s): %s", rc, stderr[:500])
+                    self._proc = None
+                    return None
             current = set(glob.glob("/dev/cu.usbmodem*"))
             new_devices = current - existing
             if new_devices:
@@ -233,6 +241,15 @@ class _USBHelperBridge:
         return None
 
     def stop(self):
+        # Kill the helper process (runs as root via osascript)
+        try:
+            subprocess.run(
+                ["osascript", "-e",
+                 'do shell script "pkill -f loki-usb-helper" with administrator privileges'],
+                timeout=5, capture_output=True,
+            )
+        except Exception:
+            pass
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
             try:
