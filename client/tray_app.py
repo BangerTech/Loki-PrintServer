@@ -404,15 +404,11 @@ if HAS_RUMPS:
 
         def _poll(self, _=None):
             def _do():
-                changed = False
                 for conn in list(self.connections.values()):
-                    was = conn.connected
                     if not conn.connected:
                         conn.try_connect(retries=1)
                     if conn.connected:
                         conn.refresh()
-                    if conn.connected != was:
-                        changed = True
                 self._schedule_rebuild()
             threading.Thread(target=_do, daemon=True).start()
 
