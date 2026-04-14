@@ -281,25 +281,38 @@ Geräte der Klasse `Vendor Specific` oder `Device` mit bekannter VID:PID werden 
 
 | Methode | macOS | Windows | Linux |
 |---------|-------|---------|-------|
-| Virtual USB (CDC-ACM) | ✅ `/dev/cu.usbmodem*` (SIP disabled) | — | — |
+| Virtual USB (CDC-ACM) | ✅ `/dev/cu.usbmodem*` (AMFI disabled) | — | — |
 | USB/IP | Lima VM (optional) | usbip-win | nativ |
 | Serial (PTY) | ✅ `/tmp/tty.loki-*` (Fallback) | com0com / TCP | ✅ `/dev/ttyLOKI*` |
 | IPP/CUPS | ✅ Netzwerkdrucker | ✅ Windows IPP | ✅ lpadmin |
 
 ### macOS Virtual USB (loki-usb-helper)
 
-Auf macOS mit deaktiviertem SIP (Kext Signing + Filesystem Protections) erstellt der Loki-Client ein **echtes virtuelles USB CDC-ACM Gerät** über `IOUSBHostControllerInterface`. Dieses Gerät:
+Auf macOS erstellt der Loki-Client ein **echtes virtuelles USB CDC-ACM Gerät** über `IOUSBHostControllerInterface`. Dieses Gerät:
 
 - Erscheint als `/dev/cu.usbmodem*` in IOKit
-- Wird von **FineCut**, **xfcut**, **Inkcut** und anderer Schneide-Software erkannt
+- Übernimmt die **echte VID/PID** des Original-USB-Geräts → Vendor-Software (FineCut, xfcut, etc.) erkennt das Gerät
 - Bridget Daten transparent über TCP zum Loki-Server
 
 **Voraussetzungen:**
 - macOS 10.15+ (Catalina oder neuer)
-- SIP muss (teilweise) deaktiviert sein: `csrutil disable` oder Custom Configuration mit deaktiviertem Kext Signing
+- **AMFI (Apple Mobile File Integrity) muss deaktiviert sein** — ohne dies kann der USB-Helper keine Kernel-Verbindung herstellen
+- SIP muss (teilweise) deaktiviert sein: Custom Configuration mit deaktiviertem Kext Signing
 - Das `loki-usb-helper` Binary wird automatisch ad-hoc signiert mit dem `com.apple.developer.usb.host-controller-interface` Entitlement
 
-**Fallback:** Wenn der USB-Helper nicht verfügbar ist oder fehlschlägt, wird automatisch auf den PTY-Bridge-Modus zurückgefallen (`/tmp/tty.loki-*`).
+**AMFI deaktivieren:**
+
+| Methode | Anleitung |
+|---------|-----------|
+| **OpenCore Legacy Patcher** | Settings → Kernel Security → "Disable AMFI" aktivieren → Apply → Neustart |
+| **OpenCore manuell** | In `config.plist` → `NVRAM` → `boot-args` den Wert `amfi_get_out_of_my_way=1` anhängen → Neustart |
+| **Normaler Mac (kein Hackintosh)** | Recovery-Modus → Terminal → `nvram boot-args="amfi_get_out_of_my_way=1"` → Neustart |
+
+> **Hinweis:** Auf Hackintosh/OpenCore-Systemen kann `nvram` nicht direkt aus dem laufenden System heraus boot-args setzen — die Änderung muss in der OpenCore `config.plist` erfolgen.
+
+**VID/PID-Spoofing:** Der USB-Helper erhält die echte Vendor-ID, Product-ID, Herstellername und Produktname vom Server. Damit erscheint z.B. ein Mimaki-Plotter als echtes Mimaki-USB-Gerät (`VID=0x0B4D`) in IOKit — FineCut erkennt ihn dadurch automatisch.
+
+**Fallback:** Wenn der USB-Helper nicht verfügbar ist oder fehlschlägt (z.B. AMFI nicht deaktiviert), wird automatisch auf den PTY-Bridge-Modus zurückgefallen (`/tmp/tty.loki-*`). Dieser funktioniert mit Software die manuelle Port-Eingabe erlaubt, wird aber von IOKit-basierten Programmen nicht erkannt.
 
 ---
 
@@ -381,7 +394,9 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 | `IncompatibleBinaryArchError: not a fat binary` | `PIL/_imagingtk.so` ist arm64-only, kein universal2-Wheel verfügbar | Runner auf `macos-15-intel` (x86_64) umstellen, kein `--target-arch` nötig |
 | `macos-13` runner error | `macos-13` seit Dez 2025 abgeschaltet | `macos-15-intel` verwenden |
 | App öffnet sich nicht / keine Menüleiste | `LSUIElement=True` → Onboarding-Fenster öffnet hinter anderen Fenstern | `NSApp.activateIgnoringOtherApps_(True)` in `onboarding.py` |
-| "App ist beschädigt" | Gatekeeper-Quarantäne durch Browser-Download | Rechtsklick → Öffnen; oder `xattr -cr /Applications/Loki-Client.app` |
+| "App ist beschädigt" | Gatekeeper-Quarantäne durch Browser-Download | `xattr -cr /Applications/Loki-Client.app` |
+| `Failed to create IOUSBHostControllerInterface` | AMFI blockiert Kernel-Zugang für USB-Helper | AMFI deaktivieren: `amfi_get_out_of_my_way=1` in boot-args (OpenCore: in config.plist) |
+| FineCut erkennt Plotter nicht | Virtuelle USB-Geräte hatten generische VID/PID | Update auf Version mit VID/PID-Spoofing; Helper übernimmt jetzt die Original-VID/PID |
 | "Programm wird auf diesem Mac nicht unterstützt" | Falscher Build-Runner (arm64 statt x86_64) | `macos-15-intel` runner bestätigt x86_64 |
 | Bundle-Modifikationen nach PyInstaller | Post-build Info.plist/Datei-Kopien brechen Ad-hoc-Signatur | `info_plist={}` im `.spec`-`BUNDLE`-Block verwenden, keine Post-build-Patches |
 | `ValueError: not enough values to unpack` | `collect_all()` Ergebnisse per `+=` auf `a.datas` TOC-Objekt | `collect_all()` **vor** `Analysis()` aufrufen, Ergebnisse als Konstruktor-Parameter übergeben |
@@ -409,4 +424,5 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 || 2026-04 | — | Custom Device Names: Geräte können im Dashboard umbenannt werden (✏️). Name wird per `vendor_id:product_id` in `custom_names.json` persistiert und an Clients propagiert. |
 || 2026-04 | — | Onboarding zeigt nur echte Peripheriegeräte (Infrastructure-Filter). |
 || 2026-04 | — | Logging: `core/logger.py` — zentrales RotatingFileHandler-Logging (2 MB, 3 Backups). macOS: `~/Library/Logs/Loki-Client/loki-client.log`, Linux/Windows: `~/.config/loki-printserver/loki-client.log`. Alle Verbindungen, API-Calls, Discovery-Events, Attach/Detach und Fehler werden geloggt. |
-|| 2026-04 | — | macOS Virtual USB: `loki-usb-helper` (Swift) erstellt echte virtuelle USB CDC-ACM Geräte über `IOUSBHostControllerInterface`. Erscheint als `/dev/cu.usbmodem*` — erkannt von FineCut, xfcut, etc. Benötigt SIP disabled. Automatischer Fallback auf PTY-Bridge wenn nicht verfügbar. |
+|| 2026-04 | — | macOS Virtual USB: `loki-usb-helper` (Swift) erstellt echte virtuelle USB CDC-ACM Geräte über `IOUSBHostControllerInterface`. Erscheint als `/dev/cu.usbmodem*` — erkannt von FineCut, xfcut, etc. Benötigt AMFI disabled. Automatischer Fallback auf PTY-Bridge wenn nicht verfügbar. |
+|| 2026-04 | — | VID/PID-Spoofing: Virtuelle USB-Geräte übernehmen die echte Vendor-ID/Product-ID des Original-USB-Geräts vom Server. Vendor-Software (FineCut für Mimaki, etc.) erkennt die Geräte dadurch automatisch. |

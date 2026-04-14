@@ -57,7 +57,7 @@ Download the latest client for your platform from **[GitHub Releases](https://gi
 3. Click your server → select your device → **Attach**
 4. The device appears locally — open your software and use it normally
 
-> **macOS only:** On first launch right-click → Open (once, because the app is not notarized yet)
+> **macOS only:** On first launch right-click → Open (once, because the app is not notarized yet). If you get "App is damaged", run `xattr -cr /Applications/Loki-Client.app`
 
 ---
 
@@ -101,8 +101,29 @@ Download the latest client for your platform from **[GitHub Releases](https://gi
 
 **Client:**
 - macOS 11+, Windows 10+, or Linux
-- macOS: `socat` for plotter serial bridge (`brew install socat`)
+- macOS cutting plotters: **AMFI must be disabled** for virtual USB device support (see below)
 - Windows: [usbip-win](https://github.com/cezanne/usbip-win/releases) for full USB passthrough
+
+---
+
+## macOS — Virtual USB for Cutting Plotters
+
+On macOS, Loki creates a **real virtual USB device** (`/dev/cu.usbmodem*`) that cutting software like **FineCut**, **xfcut**, and **Inkcut** recognizes natively. The virtual device mimics the original USB identity (Vendor ID, Product ID) so vendor-specific software detects it automatically.
+
+**This requires AMFI (Apple Mobile File Integrity) to be disabled:**
+
+| Setup | How to disable AMFI |
+|-------|---------------------|
+| **OpenCore / Hackintosh** | Add `amfi_get_out_of_my_way=1` to `boot-args` in your OpenCore `config.plist`, then reboot |
+| **OpenCore Legacy Patcher** | Settings → Kernel Security → Enable "Disable AMFI" → Apply → Reboot |
+| **Stock Mac** | Boot into Recovery → Terminal → `nvram boot-args="amfi_get_out_of_my_way=1"` → Reboot |
+
+> Without AMFI disabled, Loki falls back to a PTY bridge (`/tmp/tty.loki-*`) which works for software that allows manual port entry, but won't be detected by IOKit-based programs like FineCut.
+
+After first download, you may need to run:
+```bash
+xattr -cr /Applications/Loki-Client.app
+```
 
 ---
 

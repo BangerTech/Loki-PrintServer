@@ -22,11 +22,17 @@ final class CDCACMDevice: VirtualUSBDevice {
         0x08,                     // bDataBits: 8
     ]
 
-    init(serverHost: String, serverPort: Int, serialSuffix: String) {
+    init(serverHost: String, serverPort: Int, serialSuffix: String,
+         vendorID: UInt16? = nil, productID: UInt16? = nil,
+         manufacturerName: String = "BangerTECH", productName: String = "Loki Virtual Plotter") {
         self.serverHost = serverHost
         self.serverPort = serverPort
 
-        let desc = Self.buildDescriptors(serialSuffix: serialSuffix)
+        let desc = Self.buildDescriptors(
+            serialSuffix: serialSuffix,
+            vid: vendorID, pid: productID,
+            manufacturer: manufacturerName, product: productName
+        )
         super.init(descriptors: desc)
     }
 
@@ -156,7 +162,12 @@ final class CDCACMDevice: VirtualUSBDevice {
 
     // MARK: - USB descriptors for CDC-ACM
 
-    private static func buildDescriptors(serialSuffix: String) -> USBDescriptors {
+    private static func buildDescriptors(serialSuffix: String,
+                                          vid: UInt16? = nil, pid: UInt16? = nil,
+                                          manufacturer: String = "BangerTECH",
+                                          product: String = "Loki Virtual Plotter") -> USBDescriptors {
+        let actualVID = vid ?? 0x1D50  // OpenMoko fallback
+        let actualPID = pid ?? 0x614E
         let device: [UInt8] = [
             18,          // bLength
             0x01,        // bDescriptorType: DEVICE
@@ -165,8 +176,8 @@ final class CDCACMDevice: VirtualUSBDevice {
             0x00,        // bDeviceSubClass
             0x00,        // bDeviceProtocol
             0x08,        // bMaxPacketSize0
-            0x50, 0x1D,  // idVendor: 0x1D50 (OpenMoko)
-            0x4E, 0x61,  // idProduct: 0x614E
+            UInt8(actualVID & 0xFF), UInt8(actualVID >> 8),  // idVendor (LE)
+            UInt8(actualPID & 0xFF), UInt8(actualPID >> 8),  // idProduct (LE)
             0x00, 0x01,  // bcdDevice: 1.00
             0x01,        // iManufacturer: string 1
             0x02,        // iProduct: string 2
@@ -241,8 +252,8 @@ final class CDCACMDevice: VirtualUSBDevice {
         return USBDescriptors(
             device: device,
             configuration: config,
-            manufacturer: "BangerTECH",
-            product: "Loki Virtual Plotter",
+            manufacturer: manufacturer,
+            product: product,
             serialNumber: "LOKI\(serialSuffix)"
         )
     }

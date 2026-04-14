@@ -203,7 +203,9 @@ class _USBHelperBridge:
         os.makedirs(log_dir, exist_ok=True)
         return os.path.join(log_dir, "usb-helper.log")
 
-    def start(self, server_ip: str, tcp_port: int) -> Optional[str]:
+    def start(self, server_ip: str, tcp_port: int,
+              vendor_id: str = "", product_id: str = "",
+              manufacturer: str = "", product_name: str = "") -> Optional[str]:
         if _USBHelperBridge._starting:
             log.debug("loki-usb-helper already starting, skipping duplicate")
             return None
@@ -217,13 +219,20 @@ class _USBHelperBridge:
         _USBHelperBridge._starting = True
         helper_log = self._get_log_path()
 
+        cmd = [helper, server_ip, str(tcp_port)]
+        if vendor_id and product_id:
+            cmd += [vendor_id, product_id,
+                    manufacturer or "BangerTECH",
+                    product_name or "Loki Virtual Plotter"]
+            log.info("USB identity: VID=%s PID=%s %s %s",
+                     vendor_id, product_id, manufacturer, product_name)
+
         # Try 1: direct launch (works when AMFI is disabled)
-        log.info("Starting loki-usb-helper: %s %s %s", helper, server_ip, tcp_port)
+        log.info("Starting loki-usb-helper: %s", " ".join(cmd))
         try:
             log_fh = open(helper_log, "w")
             self._proc = subprocess.Popen(
-                [helper, server_ip, str(tcp_port)],
-                stdout=log_fh, stderr=log_fh,
+                cmd, stdout=log_fh, stderr=log_fh,
             )
         except Exception as e:
             log.warning("loki-usb-helper direct launch failed: %s", e)
@@ -238,7 +247,6 @@ class _USBHelperBridge:
                 log.info("Direct launch failed, trying with admin privileges...")
                 self._proc = None
             elif self._proc and self._proc.poll() is None:
-                # Still running after 5s but no device yet — give more time
                 result = self._wait_for_device(existing, timeout=10)
                 if result:
                     return result
@@ -248,8 +256,14 @@ class _USBHelperBridge:
             log.info("Requesting admin privileges for loki-usb-helper...")
             try:
                 escaped = helper.replace('"', '\\\\"')
+                extra_args = ""
+                if vendor_id and product_id:
+                    mfr = (manufacturer or "BangerTECH").replace('"', '\\\\"')
+                    prd = (product_name or "Loki Virtual Plotter").replace('"', '\\\\"')
+                    extra_args = f' {vendor_id} {product_id} \\"{mfr}\\" \\"{prd}\\"'
                 osa_cmd = (
-                    f'do shell script "\\"{escaped}\\" {server_ip} {tcp_port} '
+                    f'do shell script "\\"{escaped}\\" {server_ip} {tcp_port}'
+                    f'{extra_args} '
                     f'> \\"{helper_log}\\" 2>&1 &" '
                     f'with administrator privileges'
                 )
@@ -323,11 +337,15 @@ class DeviceAttacher:
         self._usb_helpers: dict[str, _USBHelperBridge] = {}  # bus_id -> USB helper
 
     def attach(self, server_ip: str, bus_id: str,
-               forward_info: Optional[dict] = None) -> AttachResult:
+               forward_info: Optional[dict] = None,
+               usb_info: Optional[dict] = None) -> AttachResult:
         """
         Attach a remote USB device. Tries the best method for this platform:
           - Linux/Windows: USB/IP first, then serial fallback
           - macOS: Serial first, then IPP for printers
+
+        usb_info: optional dict with vendor_id, product_id, manufacturer,
+                  product from the original USB device (used for VID/PID spoofing).
         """
         if not forward_info:
             forward_info = {}
@@ -341,7 +359,6 @@ class DeviceAttacher:
         result = None
 
         if OS == "Linux":
-            # Linux: prefer USB/IP (full passthrough)
             if has_usbip:
                 result = self._attach_usbip_linux(server_ip, bus_id)
             if (not result or result.status != AttachStatus.ATTACHED) and has_serial:
@@ -358,9 +375,9 @@ class DeviceAttacher:
                 result = self._attach_ipp_windows(server_ip, ipp_info)
 
         elif OS == "Darwin":
-            # macOS: Serial for plotters/serial, IPP for printers, USB/IP via Lima
             if has_serial:
-                result = self._attach_serial_macos(server_ip, serial_info, bus_id)
+                result = self._attach_serial_macos(server_ip, serial_info, bus_id,
+                                                   usb_info=usb_info)
             if (not result or result.status != AttachStatus.ATTACHED) and has_ipp:
                 result = self._attach_ipp_macos(server_ip, ipp_info)
             if (not result or result.status != AttachStatus.ATTACHED) and has_usbip:
@@ -482,14 +499,22 @@ class DeviceAttacher:
     # ══════════════════════════════════════════════════════════════════════════
 
     def _attach_serial_macos(self, server_ip: str, serial_info: dict,
-                             bus_id: str = "") -> AttachResult:
+                             bus_id: str = "",
+                             usb_info: Optional[dict] = None) -> AttachResult:
         port = serial_info.get("port")
         if not port:
             return AttachResult(AttachStatus.ERROR, message="No serial port info from server")
 
+        info = usb_info or {}
         # Try virtual USB device first (appears as real /dev/cu.usbmodem*)
         usb_helper = _USBHelperBridge()
-        device_path = usb_helper.start(server_ip, int(port))
+        device_path = usb_helper.start(
+            server_ip, int(port),
+            vendor_id=info.get("vendor_id", ""),
+            product_id=info.get("product_id", ""),
+            manufacturer=info.get("manufacturer", ""),
+            product_name=info.get("product", ""),
+        )
         if device_path:
             if bus_id:
                 self._usb_helpers[bus_id] = usb_helper

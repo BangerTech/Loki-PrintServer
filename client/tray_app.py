@@ -62,6 +62,16 @@ except ImportError:
     HAS_PYSTRAY = False
 
 
+def _usb_info(dev: DeviceInfo) -> dict:
+    """Extract USB identity fields for VID/PID spoofing in the virtual USB helper."""
+    return {
+        "vendor_id": dev.vendor_id,
+        "product_id": dev.product_id,
+        "manufacturer": dev.manufacturer or "",
+        "product": dev.product or "",
+    }
+
+
 def make_tray_icon(connected: bool = False, size: int = 64) -> "Image.Image":
     """Load the real logo icon, fall back to generated if not found."""
     from PIL import Image, ImageDraw
@@ -217,7 +227,8 @@ if HAS_RUMPS:
                 if conn.client and not fwd:
                     fwd = conn.client.get_forward_info(dev.bus_id) or {}
                 result = self.attacher.attach(
-                    conn.entry.host, dev.bus_id, forward_info=fwd)
+                    conn.entry.host, dev.bus_id, forward_info=fwd,
+                    usb_info=_usb_info(dev))
                 if result.status == AttachStatus.ATTACHED:
                     log.info("Auto-attached %s → %s",
                              dev.bus_id, result.local_device)
@@ -436,7 +447,8 @@ if HAS_RUMPS:
                     fwd_info = conn.client.get_forward_info(dev.bus_id) or fwd_info
                 log.debug("forward_info for %s: %s", dev.bus_id, fwd_info)
                 result = self.attacher.attach(conn.entry.host, dev.bus_id,
-                                              forward_info=fwd_info)
+                                              forward_info=fwd_info,
+                                              usb_info=_usb_info(dev))
                 log.info("Attach result: status=%s msg=%s dev=%s",
                          result.status, result.message, result.local_device)
                 if result.status == AttachStatus.ATTACHED:
@@ -550,7 +562,8 @@ class LokiPystrayApp:
             fwd = dev.forward_info
             if conn.client and not fwd:
                 fwd = conn.client.get_forward_info(dev.bus_id) or {}
-            result = self.attacher.attach(conn.entry.host, dev.bus_id, forward_info=fwd)
+            result = self.attacher.attach(conn.entry.host, dev.bus_id, forward_info=fwd,
+                                         usb_info=_usb_info(dev))
             log.info("pystray auto-attach %s → %s (%s)",
                      dev.bus_id, result.status, result.local_device)
 
@@ -637,7 +650,8 @@ class LokiPystrayApp:
                 conn.client.share_device(dev.bus_id)
                 fwd_info = conn.client.get_forward_info(dev.bus_id) or fwd_info
             self.attacher.attach(conn.entry.host, dev.bus_id,
-                                 forward_info=fwd_info)
+                                 forward_info=fwd_info,
+                                 usb_info=_usb_info(dev))
         conn.refresh()
         self._refresh_icon()
 
