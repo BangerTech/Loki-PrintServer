@@ -28,7 +28,6 @@ if getattr(sys, "frozen", False) and sys.platform == "darwin":
 
 # ── Now safe to import everything else ──────────────────────────────────────
 import argparse  # noqa: E402
-import datetime  # noqa: E402
 import os  # noqa: E402
 import platform  # noqa: E402
 import threading  # noqa: E402
