@@ -307,6 +307,7 @@ if HAS_RUMPS:
             self.icon = self._save_icon(any_connected)
             self.title = ""
 
+            self.menu.clear()
             items = []
 
             # ── Header ────────────────────────────────────────────────────────
@@ -480,17 +481,28 @@ if HAS_RUMPS:
 
         def _poll(self, _=None):
             def _do():
+                changed = False
+                old_attached = set(self.attacher.get_attached())
                 for conn in list(self.connections.values()):
                     was_connected = conn.connected
+                    old_devices = [(d.bus_id, d.is_shared) for d in conn.devices]
                     if not conn.connected:
                         conn.try_connect(retries=1)
                     if conn.connected:
                         conn.refresh()
                         self._auto_attach_shared(conn)
+                    new_devices = [(d.bus_id, d.is_shared) for d in conn.devices]
                     if conn.connected != was_connected:
                         log.info("Connection state changed: %s → %s (host=%s)",
                                  was_connected, conn.connected, conn.entry.host)
-                self._schedule_rebuild()
+                        changed = True
+                    elif old_devices != new_devices:
+                        changed = True
+                new_attached = set(self.attacher.get_attached())
+                if old_attached != new_attached:
+                    changed = True
+                if changed:
+                    self._schedule_rebuild()
             threading.Thread(target=_do, daemon=True).start()
 
 
@@ -639,13 +651,20 @@ class LokiPystrayApp:
 
     def _poll_loop(self):
         while self._running:
+            changed = False
             for conn in list(self.connections.values()):
+                was_connected = conn.connected
+                old_devices = [(d.bus_id, d.is_shared) for d in conn.devices]
                 if not conn.connected:
                     conn.try_connect()
                 if conn.connected:
                     conn.refresh()
                     self._auto_attach_shared(conn)
-            self._refresh_icon()
+                new_devices = [(d.bus_id, d.is_shared) for d in conn.devices]
+                if conn.connected != was_connected or old_devices != new_devices:
+                    changed = True
+            if changed:
+                self._refresh_icon()
             time.sleep(5)
 
     def _quit(self):

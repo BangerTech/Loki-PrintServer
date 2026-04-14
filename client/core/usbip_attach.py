@@ -56,7 +56,7 @@ class _PtyBridge:
     Pure-Python TCP → PTY bridge for macOS/Linux serial devices.
     No external tools (socat, etc.) required — uses only stdlib.
 
-    Creates a PTY pair, symlinks the slave to a predictable path in /tmp,
+    Creates a PTY pair, symlinks the slave to a discoverable path,
     and forwards data between the PTY master and a TCP socket in a daemon thread.
     """
 
@@ -66,26 +66,45 @@ class _PtyBridge:
         self._sock: Optional[socket.socket] = None
         self._running = False
         self.device_path: Optional[str] = None
+        self._links: list[str] = []
 
-    def start(self, server_ip: str, tcp_port: int, link: str) -> str:
+    def start(self, server_ip: str, tcp_port: int,
+              link: str, fallback_link: Optional[str] = None) -> str:
         """
-        Connect to server_ip:tcp_port and expose as a PTY at `link`.
+        Connect to server_ip:tcp_port and expose as a PTY.
+        Tries `link` first (e.g. /dev/cu.loki-*), falls back to
+        `fallback_link` (e.g. /tmp/tty.loki-*).
         Returns the path to use in cutting/printing software.
         """
         import pty as _pty
         self._master_fd, self._slave_fd = _pty.openpty()
         slave_name = os.ttyname(self._slave_fd)
-        log.info("PTY bridge: slave=%s link=%s tcp=%s:%s",
-                 slave_name, link, server_ip, tcp_port)
 
-        # Symlink to a predictable /tmp path (no root needed)
-        try:
-            if os.path.islink(link) or os.path.exists(link):
-                os.unlink(link)
-            os.symlink(slave_name, link)
-            self.device_path = link
-        except OSError:
-            self.device_path = slave_name
+        if OS == "Darwin":
+            import termios
+            attrs = termios.tcgetattr(self._slave_fd)
+            attrs[4] = termios.B9600   # ispeed
+            attrs[5] = termios.B9600   # ospeed
+            attrs[2] |= termios.CLOCAL  # ignore modem control
+            termios.tcsetattr(self._slave_fd, termios.TCSANOW, attrs)
+
+        self.device_path = slave_name
+        for candidate in [link, fallback_link]:
+            if not candidate:
+                continue
+            try:
+                if os.path.islink(candidate) or os.path.exists(candidate):
+                    os.unlink(candidate)
+                os.symlink(slave_name, candidate)
+                self._links.append(candidate)
+                if self.device_path == slave_name:
+                    self.device_path = candidate
+                log.info("PTY bridge: symlink %s → %s", candidate, slave_name)
+            except OSError as e:
+                log.debug("Cannot create symlink %s: %s", candidate, e)
+
+        log.info("PTY bridge: slave=%s device=%s tcp=%s:%s",
+                 slave_name, self.device_path, server_ip, tcp_port)
 
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.settimeout(10)
@@ -133,11 +152,12 @@ class _PtyBridge:
             except OSError:
                 pass
             self._sock = None
-        if self.device_path and os.path.islink(self.device_path):
-            try:
-                os.unlink(self.device_path)
-            except OSError:
-                pass
+        for lnk in self._links:
+            if os.path.islink(lnk):
+                try:
+                    os.unlink(lnk)
+                except OSError:
+                    pass
         log.info("PTY bridge cleaned up: %s", self.device_path)
 
 
@@ -309,13 +329,12 @@ class DeviceAttacher:
         if not port:
             return AttachResult(AttachStatus.ERROR, message="No serial port info from server")
 
-        link = f"/tmp/tty.loki-plotter-{port}"
-        log.info("Serial attach: %s:%s → %s", server_ip, port, link)
+        dev_link = f"/dev/cu.loki-plotter-{port}"
+        tmp_link = f"/tmp/tty.loki-plotter-{port}"
 
-        # ── Pure-Python PTY bridge (no external tools needed) ─────────────────
         bridge = _PtyBridge()
         try:
-            device_path = bridge.start(server_ip, int(port), link)
+            device_path = bridge.start(server_ip, int(port), dev_link, tmp_link)
         except Exception as e:
             log.error("PTY bridge start failed: %s", e)
             return AttachResult(AttachStatus.ERROR,
@@ -327,9 +346,10 @@ class DeviceAttacher:
         return AttachResult(
             AttachStatus.ATTACHED, AttachMethod.SERIAL,
             f"Plotter ready!\n\n"
-            f"Use this port in your cutting software:\n"
-            f"  {device_path}\n\n"
-            f"Works with: Inkcut, Silhouette Studio, CorelDRAW, etc.",
+            f"Port: {device_path}\n\n"
+            f"Select 'Serial' in your cutting software and\n"
+            f"choose this port from the dropdown.\n\n"
+            f"Works with: FineCut, xfcut, Inkcut, Silhouette Studio, etc.",
             local_device=device_path,
         )
 
@@ -339,12 +359,13 @@ class DeviceAttacher:
         if not port:
             return AttachResult(AttachStatus.ERROR, message="No serial port info from server")
 
-        link = f"/tmp/tty.loki-plotter-{port}"
-        log.info("Serial attach (Linux): %s:%s → %s", server_ip, port, link)
+        dev_link = f"/dev/ttyLOKI{port}"
+        tmp_link = f"/tmp/tty.loki-plotter-{port}"
+        log.info("Serial attach (Linux): %s:%s", server_ip, port)
 
         bridge = _PtyBridge()
         try:
-            device_path = bridge.start(server_ip, int(port), link)
+            device_path = bridge.start(server_ip, int(port), dev_link, tmp_link)
         except Exception as e:
             log.error("PTY bridge start failed: %s", e)
             return AttachResult(AttachStatus.ERROR, message=f"Serial bridge failed: {e}")
