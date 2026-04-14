@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.2.1  
+**Version:** 1.2.4  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -407,7 +407,8 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 | `Failed to create IOUSBHostControllerInterface` | AMFI blockiert Kernel-Zugang für USB-Helper | AMFI deaktivieren: `amfi_get_out_of_my_way=1` in boot-args (OpenCore: in config.plist) |
 | Kein `/dev/cu.usbmodem*` erscheint | VID/PID eines Geräts mit eigenem macOS-Treiber (CH340/FTDI) im Descriptor | Blockliste im Helper: CH340/FTDI/PL2303/CP210x → automatisch generische CDC-ACM VID/PID |
 | Port erkannt, aber Verbindungstest schlägt fehl | Fehlende CDC SERIAL_STATE Notification (DCD+DSR) auf Interrupt EP | Ab v1.2.1: Notification wird automatisch gesendet; `wMaxPacketSize` 10B, `bInterval` 16ms |
-| Vevor-Plotter zeigt generischen Portnamen | Blocklist-VID → generische VID/PID → macOS ignoriert Serial Number | Kosmetisch; xfcut funktioniert trotzdem. Mimaki/andere non-blocked VIDs haben korrekte Namen |
+| Vevor-Plotter zeigt generischen Portnamen | `bMaxPacketSize0` war 8 → String-Descriptors wurden abgeschnitten → macOS nutzte Location-ID statt Serial Number | Ab v1.2.4: `bMaxPacketSize0`=64, Serial Number wird korrekt übertragen. `custom_name` wird als Device Name genutzt → `/dev/cu.usbmodemVevor135Plotter1` |
+| Mimaki nicht erreichbar / kein `/dev/ttyUSB*` auf Server | `usbip-host` und `usbserial` sind mutual exclusive — usbip-host stahl das Gerät | Ab v1.2.4: Serial-Forwarding wird VOR `usbip bind` versucht. `start.sh` entlädt stale `usbip_host`, bindet Plotter zuerst an `usbserial`, dann erst `usbip_host` neu laden |
 | "Programm wird auf diesem Mac nicht unterstützt" | Falscher Build-Runner (arm64 statt x86_64) | `macos-15-intel` runner bestätigt x86_64 |
 | Bundle-Modifikationen nach PyInstaller | Post-build Info.plist/Datei-Kopien brechen Ad-hoc-Signatur | `info_plist={}` im `.spec`-`BUNDLE`-Block verwenden, keine Post-build-Patches |
 | `ValueError: not enough values to unpack` | `collect_all()` Ergebnisse per `+=` auf `a.datas` TOC-Objekt | `collect_all()` **vor** `Analysis()` aufrufen, Ergebnisse als Konstruktor-Parameter übergeben |
@@ -439,3 +440,4 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 || 2026-04 | — | Smart VID/PID: Blockliste für VIDs mit kollidierenden macOS-Treibern (CH340 0x1A86, FTDI 0x0403, Prolific 0x067B, CP210x 0x10C4) — für diese generische CDC-ACM VID/PID. Andere VIDs (z.B. Mimaki 0x0A50) werden durchgereicht → FineCut erkennt den Plotter automatisch. |
 || 2026-04 | 1.2.0 | Human-Readable Device Names: `/dev/cu.usbmodemMIMAKICGSR1` statt `/dev/cu.usbmodemLOKI7581`. Name aus custom_name, manufacturer+product oder Fallback. Fix: Swift Kompilierfehler (`log()` in statischer Methode). |
 || 2026-04 | 1.2.1 | Fix: CDC SERIAL_STATE Notification — FineCut erkannte den Port, aber Verbindungstest schlug fehl weil macOS nie DCD+DSR-Signal auf Interrupt-EP 0x82 bekam → Bulk-Datentransfer startete nicht. Interrupt-EP `wMaxPacketSize` 8→10 Bytes, `bInterval` 255→16ms. Data-Flow-Logging in usb-helper.log. |
+|| 2026-04 | 1.2.4 | Fix: `usbip-host` und `usbserial` Treiberkonflikt — serial forwarding jetzt VOR `usbip bind` (mutual exclusive). `start.sh`: stale `usbip_host` entladen, Plotter zuerst an `usbserial` binden, dann `usbip_host` mit sauberem `match_busid` laden. `_find_serial_device`: korrekte sysfs-Auflösung per `busnum`/`devnum` statt erstes `ttyUSB*`. `_try_bind_usbserial`: native USB-Plotter (Mimaki etc.) automatisch an `usbserial generic` binden. `docker-compose.yml`: `/sys` und `/dev` Mounts für Container-Gerätesichtbarkeit. `AUTO_SHARE_ALL` Default auf `true`. Shutdown bewahrt saved state für auto-restore. Client: `bMaxPacketSize0` 8→64 verhindert abgeschnittene String-Descriptors → korrekte `/dev/cu.usbmodem*`-Namen. `SERIAL_STATE` beim ersten Interrupt-Poll statt nur nach DTR → FineCut-Verbindungstest funktioniert. udev-Regel auf Host für automatische Plotter-Bindung. |
