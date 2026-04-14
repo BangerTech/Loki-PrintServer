@@ -182,12 +182,12 @@ final class CDCACMDevice: VirtualUSBDevice {
         if let v = vid, let p = pid, !blockedVIDs.contains(v) {
             actualVID = v
             actualPID = p
-            log("Using real VID/PID: 0x\(String(v, radix:16))/0x\(String(p, radix:16))")
+            print("[loki-usb] Using real VID/PID: 0x\(String(v, radix:16))/0x\(String(p, radix:16))")
         } else {
             actualVID = 0x1D50  // OpenMoko — generic CDC-ACM compatible
             actualPID = 0x614E
             if let v = vid, blockedVIDs.contains(v) {
-                log("VID 0x\(String(v, radix:16)) has conflicting macOS driver, using generic CDC-ACM VID/PID")
+                print("[loki-usb] VID 0x\(String(v, radix:16)) has conflicting macOS driver, using generic VID/PID")
             }
         }
         let device: [UInt8] = [
