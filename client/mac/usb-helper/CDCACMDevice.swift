@@ -14,6 +14,10 @@ final class CDCACMDevice: VirtualUSBDevice {
     private let inLock = NSLock()
     private var inBuffer = Data()
 
+    // CDC serial line state
+    private var dtrActive = false
+    private var serialStateChanged = true  // send initial state on first poll
+
     // Default line coding: 9600 8N1
     private var lineCoding: [UInt8] = [
         0x80, 0x25, 0x00, 0x00,  // dwDTERate: 9600 LE
@@ -94,6 +98,7 @@ final class CDCACMDevice: VirtualUSBDevice {
             if n <= 0 {
                 break
             }
+            log("TCP recv: \(n) bytes")
             inLock.lock()
             inBuffer.append(contentsOf: buf[0..<n])
             inLock.unlock()
@@ -114,6 +119,7 @@ final class CDCACMDevice: VirtualUSBDevice {
     // MARK: - USB data handling
 
     override func handleBulkOUT(endpointAddress: Int, data: [UInt8]) {
+        log("USB→TCP: \(data.count) bytes")
         tcpSend(data)
     }
 
@@ -124,12 +130,23 @@ final class CDCACMDevice: VirtualUSBDevice {
         let n = min(inBuffer.count, maxLength)
         let chunk = Array(inBuffer.prefix(n))
         inBuffer.removeFirst(n)
+        log("TCP→USB: \(n) bytes")
         return chunk
     }
 
     override func handleInterruptIN(endpointAddress: Int, maxLength: Int) -> [UInt8] {
-        // CDC notification endpoint — no pending notifications
-        return []
+        guard serialStateChanged, maxLength >= 10 else { return [] }
+        serialStateChanged = false
+        let state: UInt8 = 0x03  // DCD + DSR always active (device connected)
+        log("CDC: sending SERIAL_STATE notification (DCD+DSR)")
+        return [
+            0xA1,              // bmRequestType: class, interface, device-to-host
+            0x20,              // bNotification: SERIAL_STATE
+            0x00, 0x00,        // wValue
+            0x00, 0x00,        // wIndex: interface 0
+            0x02, 0x00,        // wLength: 2 bytes
+            state, 0x00,       // bitmap: DCD (bit 0) + DSR (bit 1)
+        ]
     }
 
     // MARK: - CDC class requests
@@ -144,6 +161,10 @@ final class CDCACMDevice: VirtualUSBDevice {
         case 0x22: // SET_CONTROL_LINE_STATE
             let dtr = (wValue & 0x01) != 0
             let rts = (wValue & 0x02) != 0
+            if dtr != dtrActive {
+                dtrActive = dtr
+                serialStateChanged = true
+            }
             log("CDC: DTR=\(dtr) RTS=\(rts)")
             return Data()
         default:
@@ -243,8 +264,8 @@ final class CDCACMDevice: VirtualUSBDevice {
             7, 0x05,
             0x82,        // bEndpointAddress: IN EP2
             0x03,        // bmAttributes: Interrupt
-            0x08, 0x00,  // wMaxPacketSize: 8
-            0xFF,        // bInterval: 255 ms
+            0x0A, 0x00,  // wMaxPacketSize: 10 (fits CDC SERIAL_STATE notification)
+            0x10,        // bInterval: 16 ms
 
             // Interface 1: CDC Data (9 bytes)
             9, 0x04,
