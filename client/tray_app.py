@@ -218,6 +218,13 @@ if HAS_RUMPS:
                 if result.status == AttachStatus.ATTACHED:
                     log.info("Auto-attached %s → %s",
                              dev.bus_id, result.local_device)
+                    name = dev.custom_name or dev.display_name
+                    path = result.local_device or ""
+                    rumps.notification(
+                        f"Device ready: {name}",
+                        f"Port: {path}",
+                        "Use this path in your cutting/printing software.",
+                    )
                 else:
                     log.warning("Auto-attach failed %s: %s",
                                 dev.bus_id, result.message)
@@ -332,8 +339,17 @@ if HAS_RUMPS:
                                 if dev.custom_name:
                                     prod = dev.custom_name
                                 is_attached = dev.bus_id in self.attacher.get_attached()
-                                shared_mark = " ✓" if is_attached else (" [shared]" if dev.is_shared else "")
-                                label = f"  {icon}  {prod}{shared_mark}"
+                                attach_info = self.attacher.get_attach_info(dev.bus_id)
+                                if is_attached:
+                                    port_hint = ""
+                                    if attach_info and attach_info.local_device:
+                                        port_hint = f"  →  {attach_info.local_device}"
+                                    label = f"  {icon}  {prod} ✓{port_hint}"
+                                elif dev.is_shared:
+                                    label = f"  {icon}  {prod}  [shared]"
+                                else:
+                                    label = f"  {icon}  {prod}"
+
                                 if dev.is_shared or is_attached:
                                     server_item.add(rumps.MenuItem(
                                         label,
