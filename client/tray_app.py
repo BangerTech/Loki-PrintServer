@@ -37,6 +37,7 @@ if getattr(sys, "frozen", False) and sys.platform == "darwin":
 
 # ── Now safe to import everything else ──────────────────────────────────────
 import argparse  # noqa: E402
+import os  # noqa: E402
 import platform  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
@@ -109,17 +110,22 @@ class ServerConnection:
         self.connected = False
         self.error: Optional[str] = None
 
-    def try_connect(self) -> bool:
-        try:
-            c = LokiAPIClient(self.entry.host, self.entry.port)
-            if c.check_health():
-                self.client = c
-                self.connected = True
-                self.error = None
-                return True
-        except Exception as e:
-            self.error = str(e)
+    def try_connect(self, retries: int = 3, delay: float = 2.0) -> bool:
+        for attempt in range(retries):
+            try:
+                c = LokiAPIClient(self.entry.host, self.entry.port)
+                if c.check_health():
+                    self.client = c
+                    self.connected = True
+                    self.error = None
+                    return True
+                self.error = "Health check returned non-200"
+            except Exception as e:
+                self.error = str(e)
+            if attempt < retries - 1:
+                time.sleep(delay)
         self.connected = False
+        print(f"[Loki] Connection to {self.entry.host}:{self.entry.port} failed: {self.error}")
         return False
 
     def refresh(self):
@@ -128,7 +134,8 @@ class ServerConnection:
         try:
             self.devices = self.client.list_devices()
             self.status = self.client.get_status()
-        except Exception:
+        except Exception as e:
+            print(f"[Loki] Refresh failed for {self.entry.host}: {e}")
             self.connected = False
             self.client = None
 
@@ -401,15 +408,12 @@ if HAS_RUMPS:
                 for conn in list(self.connections.values()):
                     was = conn.connected
                     if not conn.connected:
-                        conn.try_connect()
+                        conn.try_connect(retries=1)
                     if conn.connected:
                         conn.refresh()
                     if conn.connected != was:
                         changed = True
-                if changed:
-                    self._schedule_rebuild()
-                else:
-                    self._schedule_rebuild()  # always refresh device list
+                self._schedule_rebuild()
             threading.Thread(target=_do, daemon=True).start()
 
 
@@ -559,12 +563,38 @@ class LokiPystrayApp:
 #  Entry Point
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _acquire_lock() -> bool:
+    """Prevent multiple instances via lock file. Returns True if lock acquired."""
+    try:
+        import fcntl
+    except ImportError:
+        return True  # Windows — skip lock
+    lock_path = pathlib.Path.home() / ".config" / "loki-printserver" / ".lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        global _lock_fd  # noqa: PLW0603
+        _lock_fd = open(lock_path, "w")  # noqa: SIM115
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fd.write(str(os.getpid()))
+        _lock_fd.flush()
+        return True
+    except (OSError, IOError):
+        return False
+
+
+_lock_fd = None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Loki-PrintServer Client")
     parser.add_argument("--server", "-s", help="Server IP (skips discovery)")
     parser.add_argument("--port", "-p", type=int, default=7576)
     parser.add_argument("--no-onboarding", action="store_true")
     args = parser.parse_args()
+
+    if not _acquire_lock():
+        print("Loki-Client is already running.")
+        sys.exit(0)
 
     config = LokiConfig.load()
 
@@ -573,8 +603,9 @@ def main():
         config.add_server(args.server, args.port)
         config.first_launch = False
 
-    # Show onboarding on first launch
-    if config.first_launch and not args.no_onboarding:
+    need_onboarding = (config.first_launch or not config.servers) and not args.no_onboarding
+
+    if need_onboarding:
         from onboarding import OnboardingWindow
 
         def after_onboarding(updated_config: LokiConfig):
@@ -586,7 +617,6 @@ def main():
 
 
 def _launch_tray(config: LokiConfig):
-    import os
     import signal
     signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
 
