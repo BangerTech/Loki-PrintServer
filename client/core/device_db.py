@@ -41,6 +41,7 @@ KNOWN_DEVICES: dict[str, tuple[str, str, str]] = {
     "2166:0000": ("Roland DG", "Roland Vinyl Cutter", "✂"),
     "2166:0001": ("Roland DG", "Roland GX-24 Plotter", "✂"),
     "04b8:0005": ("Roland DG", "Roland Plotter", "✂"),
+    "0a50:0001": ("Mimaki", "Mimaki CG-SR Cutting Plotter", "✂"),
     "0a39:0003": ("Mimaki", "Mimaki Plotter", "✂"),
 
     # ── Label Printers ────────────────────────────────────────────────────

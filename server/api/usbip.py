@@ -57,6 +57,8 @@ KNOWN_DEVICES: dict[str, tuple[str, str]] = {
     "1949:0044": ("Cricut", "Cricut Explore"),
     "1949:006a": ("Cricut", "Cricut Maker"),
     "2166:0000": ("Roland DG", "Roland Vinyl Cutter"),
+    "0a50:0001": ("Mimaki", "Mimaki CG-SR Cutting Plotter"),
+    "0a39:0003": ("Mimaki", "Mimaki Plotter"),
     "0922:0028": ("Dymo", "DYMO LabelWriter 450"),
     "04f9:0027": ("Brother", "Brother QL Label Printer"),
 }
@@ -153,6 +155,12 @@ class USBIPManager:
         shared = self._shared_bus_ids.copy()
 
         try:
+            # Reset libusb backend so hot-plugged devices are discovered.
+            # Without this, libusb_get_device_list() returns a stale cache
+            # from the initial context created at process startup.
+            import usb.backend.libusb1 as _libusb1_mod
+            _libusb1_mod._backend = None
+
             usb_devices = list(usb.core.find(find_all=True))
         except Exception as e:
             logger.error(f"Failed to enumerate USB devices: {e}")
