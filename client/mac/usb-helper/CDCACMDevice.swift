@@ -23,12 +23,14 @@ final class CDCACMDevice: VirtualUSBDevice {
     ]
 
     init(serverHost: String, serverPort: Int, serialSuffix: String,
+         vendorID: UInt16? = nil, productID: UInt16? = nil,
          manufacturerName: String = "BangerTECH", productName: String = "Loki Virtual Plotter") {
         self.serverHost = serverHost
         self.serverPort = serverPort
 
         let desc = Self.buildDescriptors(
             serialSuffix: serialSuffix,
+            vid: vendorID, pid: productID,
             manufacturer: manufacturerName, product: productName
         )
         super.init(descriptors: desc)
@@ -160,15 +162,34 @@ final class CDCACMDevice: VirtualUSBDevice {
 
     // MARK: - USB descriptors for CDC-ACM
 
+    // VIDs with third-party macOS kexts that conflict with CDC-ACM.
+    // When the device descriptor contains one of these, macOS loads the
+    // vendor-specific driver instead of AppleUSBACM → no /dev/cu.usbmodem*.
+    private static let blockedVIDs: Set<UInt16> = [
+        0x1A86,  // WCH (CH340/CH341)
+        0x0403,  // FTDI (FT232R, FT2232, etc.)
+        0x067B,  // Prolific (PL2303)
+        0x10C4,  // Silicon Labs (CP210x)
+    ]
+
     private static func buildDescriptors(serialSuffix: String,
+                                          vid: UInt16? = nil, pid: UInt16? = nil,
                                           manufacturer: String = "BangerTECH",
                                           product: String = "Loki Virtual Plotter") -> USBDescriptors {
-        // MUST use a generic CDC-ACM compatible VID/PID here.
-        // Real device VID/PIDs (CH340 0x1A86, FTDI 0x0403, etc.) cause macOS
-        // to load device-specific drivers instead of AppleUSBACM, preventing
-        // /dev/cu.usbmodem* from being created.
-        let actualVID: UInt16 = 0x1D50  // OpenMoko — always CDC-ACM compatible
-        let actualPID: UInt16 = 0x614E
+        let actualVID: UInt16
+        let actualPID: UInt16
+
+        if let v = vid, let p = pid, !blockedVIDs.contains(v) {
+            actualVID = v
+            actualPID = p
+            log("Using real VID/PID: 0x\(String(v, radix:16))/0x\(String(p, radix:16))")
+        } else {
+            actualVID = 0x1D50  // OpenMoko — generic CDC-ACM compatible
+            actualPID = 0x614E
+            if let v = vid, blockedVIDs.contains(v) {
+                log("VID 0x\(String(v, radix:16)) has conflicting macOS driver, using generic CDC-ACM VID/PID")
+            }
+        }
         let device: [UInt8] = [
             18,          // bLength
             0x01,        // bDescriptorType: DEVICE

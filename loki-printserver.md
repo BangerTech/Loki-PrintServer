@@ -291,7 +291,8 @@ Geräte der Klasse `Vendor Specific` oder `Device` mit bekannter VID:PID werden 
 Auf macOS erstellt der Loki-Client ein **echtes virtuelles USB CDC-ACM Gerät** über `IOUSBHostControllerInterface`. Dieses Gerät:
 
 - Erscheint als `/dev/cu.usbmodem*` in IOKit
-- Verwendet generische CDC-ACM VID/PID (damit macOS den richtigen Treiber lädt), aber die **echten Hersteller-/Produktnamen** des Original-Geräts
+- Übernimmt die **echte VID/PID** wenn kein kollidierender macOS-Treiber existiert (Mimaki, etc.) → Vendor-Software erkennt das Gerät
+- Nutzt generische VID/PID für Geräte mit konfliktbehafteten Treibern (CH340, FTDI, etc.)
 - Bridget Daten transparent über TCP zum Loki-Server
 
 **Voraussetzungen:**
@@ -310,7 +311,7 @@ Auf macOS erstellt der Loki-Client ein **echtes virtuelles USB CDC-ACM Gerät** 
 
 > **Hinweis:** Auf Hackintosh/OpenCore-Systemen kann `nvram` nicht direkt aus dem laufenden System heraus boot-args setzen — die Änderung muss in der OpenCore `config.plist` erfolgen.
 
-**USB-Strings:** Der USB-Helper erhält den Herstellernamen und Produktnamen vom Server und setzt sie als USB-String-Descriptoren. Die VID/PID im Device Descriptor ist immer generisch (OpenMoko 0x1D50:0x614E), da echte Geräte-VID/PIDs (z.B. CH340 0x1A86) macOS dazu bringen, gerätespezifische Treiber statt dem generischen CDC-ACM Treiber zu laden, wodurch kein `/dev/cu.usbmodem*` entsteht.
+**Smart VID/PID:** Der USB-Helper erhält die echte Vendor-ID, Product-ID, Herstellername und Produktname vom Server. Er prüft eine Blockliste bekannter VIDs mit kollidierenden macOS-Treibern (CH340 `0x1A86`, FTDI `0x0403`, Prolific `0x067B`, CP210x `0x10C4`). Für blockierte VIDs wird eine generische CDC-ACM VID/PID verwendet (OpenMoko `0x1D50:0x614E`). Für alle anderen VIDs (z.B. Mimaki `0x0A50`) wird die echte VID/PID durchgereicht — damit erkennt Vendor-Software wie FineCut das Gerät automatisch.
 
 **Fallback:** Wenn der USB-Helper nicht verfügbar ist oder fehlschlägt (z.B. AMFI nicht deaktiviert), wird automatisch auf den PTY-Bridge-Modus zurückgefallen (`/tmp/tty.loki-*`). Dieser funktioniert mit Software die manuelle Port-Eingabe erlaubt, wird aber von IOKit-basierten Programmen nicht erkannt.
 
@@ -396,7 +397,7 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 | App öffnet sich nicht / keine Menüleiste | `LSUIElement=True` → Onboarding-Fenster öffnet hinter anderen Fenstern | `NSApp.activateIgnoringOtherApps_(True)` in `onboarding.py` |
 | "App ist beschädigt" | Gatekeeper-Quarantäne durch Browser-Download | `xattr -cr /Applications/Loki-Client.app` |
 | `Failed to create IOUSBHostControllerInterface` | AMFI blockiert Kernel-Zugang für USB-Helper | AMFI deaktivieren: `amfi_get_out_of_my_way=1` in boot-args (OpenCore: in config.plist) |
-| Kein `/dev/cu.usbmodem*` erscheint | Echte VID/PID im Descriptor → macOS lädt falschen Treiber | Generische CDC-ACM VID/PID verwenden (fest im Helper, kein Override) |
+| Kein `/dev/cu.usbmodem*` erscheint | VID/PID eines Geräts mit eigenem macOS-Treiber (CH340/FTDI) im Descriptor | Blockliste im Helper: CH340/FTDI/PL2303/CP210x → automatisch generische CDC-ACM VID/PID |
 | "Programm wird auf diesem Mac nicht unterstützt" | Falscher Build-Runner (arm64 statt x86_64) | `macos-15-intel` runner bestätigt x86_64 |
 | Bundle-Modifikationen nach PyInstaller | Post-build Info.plist/Datei-Kopien brechen Ad-hoc-Signatur | `info_plist={}` im `.spec`-`BUNDLE`-Block verwenden, keine Post-build-Patches |
 | `ValueError: not enough values to unpack` | `collect_all()` Ergebnisse per `+=` auf `a.datas` TOC-Objekt | `collect_all()` **vor** `Analysis()` aufrufen, Ergebnisse als Konstruktor-Parameter übergeben |
@@ -425,4 +426,4 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 || 2026-04 | — | Onboarding zeigt nur echte Peripheriegeräte (Infrastructure-Filter). |
 || 2026-04 | — | Logging: `core/logger.py` — zentrales RotatingFileHandler-Logging (2 MB, 3 Backups). macOS: `~/Library/Logs/Loki-Client/loki-client.log`, Linux/Windows: `~/.config/loki-printserver/loki-client.log`. Alle Verbindungen, API-Calls, Discovery-Events, Attach/Detach und Fehler werden geloggt. |
 || 2026-04 | — | macOS Virtual USB: `loki-usb-helper` (Swift) erstellt echte virtuelle USB CDC-ACM Geräte über `IOUSBHostControllerInterface`. Erscheint als `/dev/cu.usbmodem*` — erkannt von FineCut, xfcut, etc. Benötigt AMFI disabled. Automatischer Fallback auf PTY-Bridge wenn nicht verfügbar. |
-|| 2026-04 | — | VID/PID-Fix: Virtuelle USB-Geräte verwenden immer generische CDC-ACM VID/PID (OpenMoko 0x1D50:0x614E). Echte Geräte-VID/PIDs hatten macOS dazu gebracht, gerätespezifische Treiber zu laden → kein /dev/cu.usbmodem*. Echte Hersteller-/Produktnamen werden weiterhin als USB-String-Descriptoren gesetzt. |
+|| 2026-04 | — | Smart VID/PID: Blockliste für VIDs mit kollidierenden macOS-Treibern (CH340 0x1A86, FTDI 0x0403, Prolific 0x067B, CP210x 0x10C4) — für diese generische CDC-ACM VID/PID. Andere VIDs (z.B. Mimaki 0x0A50) werden durchgereicht → FineCut erkennt den Plotter automatisch. |
