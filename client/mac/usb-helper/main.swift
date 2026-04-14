@@ -77,7 +77,18 @@ if let v = vid, let p = pid {
 }
 print("[loki-usb] Identity: \(manufacturer) / \(product)")
 
-let device: VirtualUSBDevice
+// Global reference so signal handlers (C function pointers) can access it.
+var gDevice: VirtualUSBDevice?
+
+signal(SIGINT, { _ in
+    print("\n[loki-usb] Shutting down...")
+    gDevice?.stop()
+    exit(0)
+})
+signal(SIGTERM, { _ in
+    gDevice?.stop()
+    exit(0)
+})
 
 if mode == "vendor" {
     print("[loki-usb] Mode: vendor-specific USB device (for IOKit matching)")
@@ -86,18 +97,7 @@ if mode == "vendor" {
         vendorID: vid ?? 0, productID: pid ?? 0,
         manufacturerName: manufacturer, productName: product
     )
-    device = vendorDev
-
-    signal(SIGINT) { _ in
-        print("\n[loki-usb] Shutting down...")
-        vendorDev.stop()
-        exit(0)
-    }
-    signal(SIGTERM) { _ in
-        vendorDev.stop()
-        exit(0)
-    }
-
+    gDevice = vendorDev
     do {
         try vendorDev.connectAndRun()
     } catch {
@@ -112,18 +112,7 @@ if mode == "vendor" {
         vendorID: vid, productID: pid,
         manufacturerName: manufacturer, productName: product
     )
-    device = cdcDev
-
-    signal(SIGINT) { _ in
-        print("\n[loki-usb] Shutting down...")
-        cdcDev.stop()
-        exit(0)
-    }
-    signal(SIGTERM) { _ in
-        cdcDev.stop()
-        exit(0)
-    }
-
+    gDevice = cdcDev
     do {
         try cdcDev.connectAndRun()
     } catch {
