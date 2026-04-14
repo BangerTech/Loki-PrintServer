@@ -239,10 +239,10 @@ class _USBHelperBridge:
 
     # VIDs of devices that use vendor-specific USB protocol (not serial).
     # These need the 'vendor' mode helper instead of CDC-ACM.
-    # Note: Mimaki (0x0A50) was tested — FineCut's "USB" dropdown actually
-    # lists CDC-ACM serial ports (/dev/cu.usbmodem*), not IOKit USB devices.
-    # So Mimaki also needs CDC-ACM mode for FineCut compatibility.
-    VENDOR_SPECIFIC_VIDS: set = set()
+    # FineCut communicates via direct IOKit USB (IOUSBDeviceInterface942),
+    # not serial ports. The vendor device must be discoverable by VID/PID
+    # via IOServiceMatching("IOUSBDevice").
+    VENDOR_SPECIFIC_VIDS: set = {"0a50"}  # Mimaki
 
     def start(self, server_ip: str, tcp_port: int,
               vendor_id: str = "", product_id: str = "",

@@ -447,6 +447,10 @@ open class VirtualUSBDevice: NSObject {
             return handleClassSetup(bmRequestType: bmRequestType, bRequest: bRequest,
                                     wValue: wValue, wIndex: wIndex, wLength: wLength)
 
+        case 0x40, 0xC0, 0x41, 0xC1, 0x42, 0xC2:
+            return handleClassSetup(bmRequestType: bmRequestType, bRequest: bRequest,
+                                    wValue: wValue, wIndex: wIndex, wLength: wLength)
+
         default:
             return Data()
         }

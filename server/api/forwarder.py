@@ -108,6 +108,8 @@ class ForwardingManager:
                            product_name: str = "",
                            auto_share: bool = False):
         """Enable all applicable forwarding for a device."""
+        from .usb_bridge import needs_raw_usb, USBBridge
+
         state = self._states.setdefault(bus_id, ForwardState(bus_id=bus_id))
         state.device_class = device_class
         state.vendor_id = vendor_id
@@ -115,6 +117,29 @@ class ForwardingManager:
         state.product_name = product_name
         if auto_share:
             state.auto_share = True
+
+        # 0) Raw USB bridge — for vendor-specific devices (e.g. Mimaki) where
+        #    the host application uses direct IOKit USB access, not serial.
+        if needs_raw_usb(vendor_id):
+            port = self._next_serial_port
+            self._next_serial_port += 1
+            try:
+                bridge = USBBridge(
+                    vid=int(vendor_id, 16),
+                    pid=int(product_id, 16),
+                    tcp_port=port,
+                )
+                if await bridge.start():
+                    state.serial_port = port
+                    state.serial_dev = f"usb-bridge:{vendor_id}:{product_id}"
+                    logger.info(
+                        f"Raw USB bridge active for {bus_id} ({vendor_id}:{product_id}) "
+                        f"→ TCP:{port}"
+                    )
+                    self.save_state()
+                    return state
+            except Exception as e:
+                logger.error(f"Raw USB bridge failed for {bus_id}: {e}")
 
         # 1) Serial forwarding — preferred for macOS clients (CDC-ACM bridge).
         #    USB/IP bind and usbserial are MUTUALLY EXCLUSIVE for the same
