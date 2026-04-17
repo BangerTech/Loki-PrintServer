@@ -27,7 +27,6 @@ TCP Frame Protocol:
 
 import asyncio
 import logging
-import os
 import struct
 import threading
 import time
@@ -106,7 +105,6 @@ class USBBridge:
                 dev.set_configuration()
             except usb.core.USBError:
                 dev.reset()
-                import time
                 time.sleep(0.5)
                 dev = usb.core.find(idVendor=self.vid, idProduct=self.pid)
                 if not dev:
@@ -152,7 +150,6 @@ class USBBridge:
 
     def _self_test(self):
         """Quick self-test: send OH; and check if plotter responds."""
-        import time
         try:
             r = self._dev.ctrl_transfer(0xC1, 0x0D, 0, 0, 4, timeout=2000)
             logger.info(f"USB bridge self-test: status before = {bytes(r).hex()}")
@@ -231,7 +228,7 @@ class USBBridge:
                     await writer.drain()
 
         except (asyncio.IncompleteReadError, ConnectionError):
-            logger.info(f"USB bridge: client disconnected")
+            logger.info("USB bridge: client disconnected")
         except Exception as e:
             logger.error(f"USB bridge: client error: {e}")
         finally:
@@ -269,7 +266,7 @@ class USBBridge:
                 return _frame(MSG_CTRL_RESP, bytes([STATUS_OK]) + bytes(result))
             else:
                 self._dev.ctrl_transfer(bmRT, bReq, wVal, wIdx, data_out, timeout=2000)
-                logger.debug(f"USB bridge: CTRL OUT → OK")
+                logger.debug("USB bridge: CTRL OUT → OK")
                 return _frame(MSG_CTRL_RESP, bytes([STATUS_OK]))
         except usb.core.USBError as e:
             if e.errno == 32:  # pipe error (STALL)

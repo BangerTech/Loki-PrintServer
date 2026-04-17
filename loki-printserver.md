@@ -368,6 +368,22 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 - [ ] Neues Tag mit inkrementierter Version gesetzt (z.B. `v1.2.1` → `v1.2.2`)
 - [ ] Tag gepusht (`git push origin v1.2.2`)
 - [ ] GitHub Actions unter https://github.com/BangerTech/Loki-PrintServer/actions prüfen ob der Workflow gestartet ist
+- [ ] Optional lokal: `ruff check server/api/ client/` (entspricht den CI-Lint-Jobs)
+
+### CI / Lint (`.github/workflows/ci.yml`)
+
+Die Jobs **Lint & Test Server** und **Lint & Test Client** führen u. a. `ruff check server/api/` bzw. `ruff check client/` aus. Schlägt Ruff fehl, endet der Job **sofort** (oft nach wenigen Sekunden) — das ist dann ein **Lint-Problem im Code**, nicht automatisch ein „Minuten-Budget“-Thema.
+
+Wenn GitHub stattdessen meldet, dass der Job **gar nicht gestartet** wurde (*recent account payments have failed* / *spending limit*), liegt es an **Billing** (Zahlungsmittel, offene Rechnungen, Actions-Spending-Limit): **Settings → Billing and plans** (bzw. Organisation → Billing).
+
+Lokal prüfen (Python 3.12 empfohlen, wie im Workflow):
+
+```bash
+pip install ruff
+ruff check server/api/ client/
+```
+
+Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 
 ---
 
@@ -445,3 +461,4 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 || 2026-04 | 1.4.0 | **Raw USB Bridge**: FineCut-Binary reverse-engineered — nutzt `IOServiceMatching("IOUSBDevice")` + `IOUSBDeviceInterface942` + Bulk ReadPipe/WritePipe. Vendor-Control-Request `0xC0/0x01` für Plotter-Identifikation (`CG-SR-00`). Neues `usb_bridge.py` auf dem Server: pyusb-basierte Raw-USB-Bridge ersetzt socat+usbserial für Mimaki. Framed TCP-Protokoll (Control+Bulk) leitet alle USB-Transaktionen transparent vom Mac-VendorDevice zum echten Plotter weiter. `VendorDevice.swift`: Control-Request-Forwarding via TCP-Protokoll. `VirtualUSBDevice.swift`: Vendor-spezifische Requests (0x40/0xC0) werden an Subklasse delegiert. `forwarder.py`: automatische Erkennung vendor-spezifischer Geräte per VID → Raw USB Bridge statt socat. |
 || 2026-04 | 1.4.1 | **Kritische Fixes für Raw USB Bridge**: (1) `_resolve_usbip_busid` gab immer den ersten busid zurück → usbip band den Mimaki für ALLE Geräte um und stahl ihn von pyusb. Fix: korrekte sysfs-Auflösung per `busnum`/`devnum`. (2) `start.sh` registrierte Mimaki bei `usbserial_generic` → Fix: Mimaki aus usbserial-Registration entfernt, stattdessen Kernel-Treiber aktiv entbunden. (3) `share_device` erstellt bei Re-Share keine zweite Bridge-Instanz mehr (erkennt aktive Bridge via `serial_dev` Prefix). (4) Bridge Self-Test: sendet `OH;` nach Device-Open und prüft Plotter-Antwort. **Ergebnis: FineCut schneidet erfolgreich über Loki-PrintServer.** |
 || 2026-04 | 1.4.2 | **Fix: CDC-ACM Device Name**: macOS `AppleUSBACMData` Treiber nutzt die USB-Seriennummer für den `/dev/cu.usbmodem<name>` Pfad nur wenn sie ≤ 8 ASCII-Zeichen hat (Quellcode-Analyse des Apple CDC-Treibers). Längere Namen verursachen Fallback auf Location-ID-Naming (z.B. `usbmodem89101`). Fix: `CDCACMDevice.swift` und `usbip_attach.py` kürzen den Device-Name auf max 8 Zeichen. Beispiel: `Vevor135Plotter` → `Vevor135` → `/dev/cu.usbmodemVevor1351`. |
+|| 2026-04 | — | **CI / Doku:** Ruff-Fixes (`F541` überflüssige `f`-Strings in `usbip_attach.py`; `F401`/`F811`/`F541` in `usb_bridge.py`). `loki-printserver.md`: Abschnitt CI/Lint + Billing-Hinweis. README: Lizenzblock ohne Third-Party-Disclaimer-Zeile. |

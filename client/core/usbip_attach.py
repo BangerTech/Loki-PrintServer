@@ -620,10 +620,10 @@ class DeviceAttacher:
                 self._usb_helpers[bus_id] = usb_helper
             is_vendor = device_path.startswith("USB (")
             if is_vendor:
-                msg = (f"Plotter ready! (Vendor USB)\n\n"
-                       f"The device appears as the original USB device.\n"
-                       f"Your plotter software should detect it automatically.\n\n"
-                       f"Works with: FineCut, Mimaki software, etc.")
+                msg = ("Plotter ready! (Vendor USB)\n\n"
+                       "The device appears as the original USB device.\n"
+                       "Your plotter software should detect it automatically.\n\n"
+                       "Works with: FineCut, Mimaki software, etc.")
             else:
                 msg = (f"Plotter ready! (Virtual USB)\n\n"
                        f"Port: {device_path}\n\n"

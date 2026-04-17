@@ -146,4 +146,3 @@ client\build\build_windows.bat
 
 MIT License — © BangerTECH
 
-Not affiliated with VirtualHere or any commercial USB over IP product.
