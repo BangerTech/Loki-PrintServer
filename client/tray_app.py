@@ -647,11 +647,9 @@ class LokiPystrayApp:
                         ))
 
                 sub_items.append(pystray.Menu.SEPARATOR)
-                sub_items.append(pystray.MenuItem(
-                    "Open Dashboard",
-                    lambda _, h=host, p=conn.entry.port:
-                        webbrowser.open(f"http://{h}:{p}")
-                ))
+                def _open_dashboard(_, h=host, p=conn.entry.port):
+                    webbrowser.open(f"http://{h}:{p}")
+                sub_items.append(pystray.MenuItem("Open Dashboard", _open_dashboard))
                 items.append(pystray.MenuItem(label, pystray.Menu(*sub_items)))
 
         items.append(pystray.Menu.SEPARATOR)
