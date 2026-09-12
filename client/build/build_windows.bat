@@ -39,6 +39,13 @@ if not exist "dist\LokiClient.exe" (
 )
 echo [+] EXE created: dist\LokiClient.exe
 
+echo [+] Fetching bundled usbip-win driver...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0fetch_usbip_win.ps1"
+if not exist "windows\usbip-win\usbip.exe" (
+    echo [!] ERROR: usbip-win not downloaded
+    exit /b 1
+)
+
 REM Build installer with Inno Setup if available
 where /q ISCC.exe 2>nul
 if %errorlevel% equ 0 (

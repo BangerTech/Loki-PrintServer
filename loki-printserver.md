@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.4.4  
+**Version:** 1.4.5  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -25,7 +25,7 @@ docker compose up -d
 Unter **https://github.com/BangerTech/Loki-PrintServer/releases** die neueste Version herunterladen:
 
 - **macOS:** `Loki-Client.dmg` → in Applications ziehen → Rechtsklick → Öffnen (einmalig, da nicht notarisiert)
-- **Windows:** `LokiClient-Setup.exe` → Installer ausführen. Für **Mimaki FineCut** zusätzlich [usbip-win](https://github.com/cezanne/usbip-win/releases) installieren (Treiber als Administrator), sonst erscheint der Plotter nicht als lokales USB-Gerät.
+- **Windows:** `LokiClient-Setup.exe` → Installer ausführen (einmal UAC/Administrator bestätigen — der usbip-win-Treiber wird mitinstalliert)
 - **Linux:** `Loki-Client-linux` → ausführbar machen und starten
 
 ---
@@ -96,7 +96,8 @@ Client (Mac/Win/Linux)
 | `mac/usb-helper/build.sh` | Standalone-Build-Script für den USB-Helper |
 | `build/build_mac.sh` | macOS .app + .dmg Builder (PyInstaller `.spec` + `create-dmg` + USB-Helper) |
 | `build/build_windows.bat` | Windows .exe Builder (PyInstaller + Inno Setup) |
-| `build/installer.iss` | Windows Installer-Skript (Inno Setup) |
+| `build/fetch_usbip_win.ps1` | Lädt signiertes usbip-win 0.3.5 für das Setup (nicht im Git) |
+| `build/installer.iss` | Windows Installer-Skript (Inno Setup, Admin + usbip.exe install) |
 
 ---
 
@@ -425,7 +426,7 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 |---------|---------|-----|
 | `IPersistFile::Save failed; Code 0x80070005. Zugriff verweigert` beim Anlegen von `C:\Users\Public\Desktop\Loki-Client.lnk` | Installer läuft per-user (`PrivilegesRequired=lowest`), die Desktop-Verknüpfung zielte auf `{commondesktop}` (öffentlicher Desktop, braucht Admin) | `{autodesktop}` nutzen — ohne Elevation landet die `.lnk` auf dem Benutzer-Desktop |
 | `Failed to execute script 'tray_app'` / `ValueError: <function …_open_dashboard>` | pystray erlaubt nur 0–2 Positionsargumente; `def _open_dashboard(_, h=host, p=port)` hat 3 → Crash beim Tray-Start | Callbacks über `_pystray_action()` wrappen (nur `icon, item`) |
-| Dashboard „Shared“, FineCut/Plotter nicht grün, kein Schneiden | Windows hat kein virtuelles USB. Client meldete fälschlich `tcp://server:7580` als Attach — FineCut braucht das echte USB-Gerät | Server `attach-mode=usbip`, Client **usbip-win**. Ohne Treiber erscheint ein Dialog statt Fake-Attach |
+| Dashboard „Shared“, FineCut/Plotter nicht grün, kein Schneiden | Windows hat kein virtuelles USB. Client meldete fälschlich `tcp://server:7580` als Attach — FineCut braucht das echte USB-Gerät | Server `attach-mode=usbip`; Setup installiert usbip-win (UAC). Ohne Treiber Dialog statt Fake-Attach |
 
 ---
 
@@ -482,3 +483,4 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-09 | 1.4.4 | **Fix: Windows Installer + Tray:** Desktop-Shortcut `{commondesktop}` → `{autodesktop}` (kein `0x80070005` mehr auf `C:\Users\Public\Desktop`). pystray-Callbacks über `_pystray_action()` gewrappt — Tray startet wieder (`ValueError` durch >2 Positionsargumente). |
 || 2026-09 | — | **CI / Ruff:** `ruff.toml` mit fester Regelmenge (E/F/UP). `Optional[X]` → `X \| None` in Server- und Client-Code. Verhindert den 76-Fehler-Break durch Ruff 0.16-Defaults (UP045, BLE001, S110, …). |
 || 2026-09 | — | **Fix: Windows Mimaki-Plot:** Client attached CG-SR nur als `tcp://…:7580` (Raw-USB-Bridge) — FineCut sieht kein USB-Gerät. Neu: `POST /api/devices/{bus_id}/attach-mode` schaltet Pi auf USB/IP; Windows hängt per usbip-win an. Ohne usbip-win Dialog statt Fake-Attach. macOS-Bridge unverändert. |
+|| 2026-09 | 1.4.5 | **Windows Setup bündelt usbip-win 0.3.5** (signierter VHCI-Treiber). `usbip.exe install` läuft im Setup (Admin/UAC). Anwender muss den Treiber nicht mehr separat holen. macOS unverändert. |

@@ -1,7 +1,7 @@
 ; Loki-PrintServer Windows Installer (Inno Setup)
 ; NOTE: All paths are relative to the location of this .iss file (client/build/)
 #define MyAppName "Loki-Client"
-#define MyAppVersion "1.4.4"
+#define MyAppVersion "1.4.5"
 #define MyAppPublisher "BangerTECH"
 #define MyAppURL "https://github.com/BangerTech/Loki-PrintServer"
 #define MyAppExeName "LokiClient.exe"
@@ -20,8 +20,9 @@ SetupIconFile=..\assets\icon.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
-; Per-user install (no UAC). {auto*} constants then resolve to the current user.
-PrivilegesRequired=lowest
+; Admin is required to install the bundled usbip-win VHCI driver.
+; {autodesktop}/{autopf} then resolve to all-users locations.
+PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 
 [Languages]
@@ -34,6 +35,7 @@ Name: "startupitem"; Description: "Start Loki-PrintServer at login"; GroupDescri
 
 [Files]
 Source: "..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\windows\usbip-win\*"; DestDir: "{app}\usbip-win"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -47,4 +49,9 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   Tasks: startupitem
 
 [Run]
+; WorkingDir must be the driver folder so usbip.exe finds the .inf/.sys/.cat files.
+Filename: "{app}\usbip-win\usbip.exe"; Parameters: "install"; \
+  WorkingDir: "{app}\usbip-win"; \
+  StatusMsg: "Installing USB/IP driver…"; \
+  Flags: runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent

@@ -44,6 +44,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
       - name: Build EXE
         run: client\build\build_windows.bat
         shell: cmd

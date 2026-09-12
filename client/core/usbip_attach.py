@@ -549,10 +549,9 @@ class DeviceAttacher:
             return AttachResult(
                 AttachStatus.ERROR,
                 message=(
-                    "usbip-win is required for Mimaki / vendor USB on Windows.\n\n"
-                    "1. Download: https://github.com/cezanne/usbip-win/releases\n"
-                    "2. Install the usbip-win driver (as Administrator)\n"
-                    "3. Restart Loki-Client\n\n"
+                    "USB/IP driver not found.\n\n"
+                    "Re-run LokiClient-Setup.exe and accept the Administrator prompt "
+                    "so the bundled usbip-win driver can be installed.\n\n"
                     "FineCut will then see the plotter as a local USB device."
                 ),
             )
@@ -599,17 +598,28 @@ class DeviceAttacher:
         return AttachResult(AttachStatus.DETACHED, message="USB/IP detached")
 
     def _find_usbip_win(self) -> str | None:
+        candidates: list[str] = []
+        if getattr(sys, "frozen", False):
+            candidates.append(os.path.join(
+                os.path.dirname(sys.executable), "usbip-win", "usbip.exe"
+            ))
+        here = os.path.dirname(os.path.abspath(__file__))
+        candidates.append(os.path.normpath(
+            os.path.join(here, "..", "windows", "usbip-win", "usbip.exe")
+        ))
         for name in ("usbip.exe", "usbip-win.exe"):
-            if shutil.which(name):
-                return shutil.which(name)
-        for p in (
+            found = shutil.which(name)
+            if found:
+                candidates.append(found)
+        candidates.extend((
             r"C:\Program Files\usbip-win\usbip.exe",
             r"C:\Program Files\USBip-Win2\usbip.exe",
             r"C:\Program Files (x86)\usbip-win\usbip.exe",
             r"C:\usbip-win\usbip.exe",
             r"C:\usbip-win2\usbip.exe",
-        ):
-            if os.path.exists(p):
+        ))
+        for p in candidates:
+            if p and os.path.exists(p):
                 return p
         return None
 
