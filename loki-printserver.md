@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.4.10  
+**Version:** 1.4.11  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -436,6 +436,7 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 | Fehlerdialog „Plotter not attached“ nicht wegklickbar / stapelt sich | `_notify` erzeugte pro Aufruf ein neues `tk.Tk()` aus einem Hintergrund-Thread | Native Win32 `MessageBoxW` (thread-sicher, immer klickbar) + Dedup |
 | `usbip: error: vhci driver is not loaded` | usbip-win 0.3.5 nutzt einen test-signierten Treiber; ohne Test-Signing-Modus lädt Windows ihn nicht | Setup aktiviert Test-Signing + Reboot; Client versucht 1× elevated `usbip install`. Bei Secure Boot: im UEFI abschalten |
 | Setup: `bcdedit.exe` CreateProcess Code 2 (Datei nicht gefunden) | 32-Bit-Inno-Setup sieht `{sys}` als SysWOW64; `bcdedit` existiert nur in System32 (64-Bit) | `ArchitecturesInstallIn64BitMode=x64`; `bcdedit` per Pascal `Exec` (kein Abbruch wenn es fehlschlägt) |
+| CI: Inno `Identifier expected` in `installer.iss` | `{...}` im `[Code]`-Block ist keine Pascal-Kommentar-Syntax, Inno parsed `{sys}` als Konstante | Nur `//`-Kommentare im `[Code]`-Block |
 
 ---
 
@@ -498,3 +499,4 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-09 | 1.4.8 | **Fix: Windows Konsolenfenster-Flash:** `CREATE_NO_WINDOW` zu allen `subprocess.run`/`Popen`-Calls in `usbip_attach.py` (inkl. `_run_usbip_win`, `com2tcp`). **Fix: usbip-Retry-Loop:** Auto-Attach-Fehler werden mit 60s-Backoff gedrosselt — kein ständiges Aufpoppen mehr wenn `usbip.exe attach` fehlschlägt. Backoff wird zurückgesetzt wenn das Gerät nicht mehr sichtbar ist oder manuell umgeschaltet wird. macOS-Client unverändert. |
 || 2026-09 | 1.4.9 | **Fix: `vhci driver is not loaded`:** Setup aktiviert Test-Signing (`bcdedit /set testsigning on`) und fordert Reboot — usbip-win 0.3.5 ist test-signiert. Client prüft vor `attach` per `usbip port` ob der VHCI-Treiber geladen ist, versucht sonst 1× elevated `usbip install` (UAC) und zeigt eine klare Anleitung (Test-Signing/Secure-Boot). **Fix: Fehlerdialog:** native Win32 `MessageBoxW` statt tkinter aus Hintergrund-Thread — immer wegklickbar, keine gestapelten Dialoge (Dedup). macOS-Client unverändert. |
 || 2026-09 | 1.4.10 | **Fix: Setup `bcdedit.exe` nicht gefunden (CreateProcess 2):** 32-Bit-Inno-Setup hat `{sys}` nach SysWOW64 umgeleitet. Setup ist jetzt 64-Bit; Test-Signing läuft per Pascal `Exec` und bricht die Installation nicht mehr ab. |
+|| 2026-09 | 1.4.11 | **Fix: Inno Setup Compile `Identifier expected`:** `{...}`-Kommentare im `[Code]`-Block werden als Konstanten gelesen (`{sys}`). Jetzt `//`-Kommentare. `build_windows.bat` bricht bei ISCC-Fehler wirklich ab. |

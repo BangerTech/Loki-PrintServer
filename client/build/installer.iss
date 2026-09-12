@@ -1,7 +1,7 @@
 ; Loki-PrintServer Windows Installer (Inno Setup)
 ; NOTE: All paths are relative to the location of this .iss file (client/build/)
 #define MyAppName "Loki-Client"
-#define MyAppVersion "1.4.10"
+#define MyAppVersion "1.4.11"
 #define MyAppPublisher "BangerTECH"
 #define MyAppURL "https://github.com/BangerTech/Loki-PrintServer"
 #define MyAppExeName "LokiClient.exe"
@@ -63,7 +63,8 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 [Code]
 function BcdEditPath(): String;
 begin
-  { 32-bit Setup on 64-bit Windows: {sys} is SysWOW64, where bcdedit does not exist. }
+  // Brace comments are illegal here: Inno treats {sys} as a constant.
+  // 32-bit Setup on 64-bit Windows: sys is SysWOW64; bcdedit lives in System32.
   if IsWin64 and not Is64BitInstallMode then
     Result := ExpandConstant('{sysnative}\bcdedit.exe')
   else
@@ -81,7 +82,7 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    { Test-signing is required for usbip-win 0.3.5. Never abort Setup if this fails. }
+    // Test-signing is required for usbip-win 0.3.5. Never abort Setup if this fails.
     Exec(BcdEditPath(), '/set testsigning on', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     MsgBox(
       'Loki-Client installed.' + #13#10 + #13#10 +

@@ -59,11 +59,11 @@ if %errorlevel% equ 0 (
 if defined ISCC (
     echo [+] Building installer with Inno Setup...
     "%ISCC%" build\installer.iss
-    if %errorlevel% equ 0 (
-        echo [+] Installer created: dist\LokiClient-Setup.exe
-    ) else (
-        echo [!] Inno Setup failed - shipping raw EXE only
+    if errorlevel 1 (
+        echo [!] Inno Setup failed
+        exit /b 1
     )
+    echo [+] Installer created: dist\LokiClient-Setup.exe
 ) else (
     echo [i] Inno Setup not found - skipping installer
 )
