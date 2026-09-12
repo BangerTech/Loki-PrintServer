@@ -13,7 +13,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import psutil
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +22,7 @@ from .discovery import MDNSAnnouncer
 from .forwarder import ForwardingManager
 from .models import (
     AttachModeRequest,
+    ClientLogRequest,
     ConnectedClient,
     DeviceInfo,
     RenameRequest,
@@ -223,16 +224,37 @@ async def get_status():
 
 @app.get("/api/logs")
 async def get_logs(lines: int = Query(80, ge=1, le=500)):
-    """Return the last lines of the server log (file, then in-memory buffer)."""
+    """Last log lines: live buffer first (this process), then the rotating file."""
+    if _LOG_BUFFER:
+        return {"lines": list(_LOG_BUFFER)[-lines:]}
     text_lines: list[str] = []
     if _LOG_FILE.exists():
         try:
             text_lines = _LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError as e:
             logger.warning("Could not read log file: %s", e)
-    if not text_lines:
-        text_lines = list(_LOG_BUFFER)
     return {"lines": text_lines[-lines:]}
+
+
+@app.post("/api/client-log")
+async def client_log(req: ClientLogRequest, request: Request):
+    """Windows/macOS clients report attach errors so they show in the dashboard log."""
+    ip = request.client.host if request.client else "?"
+    host = (req.host or ip)[:80]
+    msg = (req.message or "").replace("\n", " ").strip()[:500]
+    bus = (req.bus_id or "")[:32]
+    prefix = f"Client {host}"
+    if bus:
+        prefix += f" [{bus}]"
+    line = f"{prefix}: {msg}"
+    level = (req.level or "info").strip().lower()
+    if level == "error":
+        logger.error(line)
+    elif level == "warning":
+        logger.warning(line)
+    else:
+        logger.info(line)
+    return {"ok": True}
 
 
 async def _merge_shared_devices(devices: list[DeviceInfo]) -> list[DeviceInfo]:
@@ -367,12 +389,18 @@ async def get_forward_info(bus_id: str):
 async def set_attach_mode(bus_id: str, req: AttachModeRequest):
     """Switch Mimaki/raw-USB devices between Mac USB-bridge and Windows USB/IP."""
     try:
-        info = await forwarder.set_attach_mode(bus_id, req.mode.strip().lower())
+        mode = req.mode.strip().lower()
+        logger.info("attach-mode %s → %s (Windows USB/IP or Mac bridge)", bus_id, mode)
+        info = await forwarder.set_attach_mode(bus_id, mode)
+        logger.info("attach-mode %s done usbip=%s busid=%s",
+                    bus_id, info.get("usbip"), info.get("usbip_busid"))
         await broadcast_event("device_shared", {"bus_id": bus_id, "forward_info": info})
         return {"success": True, "bus_id": bus_id, "forward_info": info}
     except ValueError as e:
+        logger.warning("attach-mode %s rejected: %s", bus_id, e)
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
+        logger.error("attach-mode %s failed: %s", bus_id, e)
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 

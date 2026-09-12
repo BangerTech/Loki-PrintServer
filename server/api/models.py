@@ -37,6 +37,13 @@ class AttachModeRequest(BaseModel):
     mode: str  # "usbip" (Windows) or "bridge" (macOS FineCut)
 
 
+class ClientLogRequest(BaseModel):
+    level: str = "info"
+    message: str
+    bus_id: str = ""
+    host: str = ""
+
+
 class ConnectedClient(BaseModel):
     ip: str
     port: int

@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.4.11  
+**Version:** 1.4.12  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -25,7 +25,7 @@ docker compose up -d
 Unter **https://github.com/BangerTech/Loki-PrintServer/releases** die neueste Version herunterladen:
 
 - **macOS:** `Loki-Client.dmg` → in Applications ziehen → Rechtsklick → Öffnen (einmalig, da nicht notarisiert)
-- **Windows:** `LokiClient-Setup.exe` → Installer ausführen (einmal UAC/Administrator bestätigen — der usbip-win-Treiber wird mitinstalliert). Der Setup aktiviert den Test-Signing-Modus für den test-signierten VHCI-Treiber und fordert danach einen **Neustart**. Falls der Plotter nach dem Reboot weiter nicht erkannt wird: **Secure Boot** im UEFI/BIOS deaktivieren.
+- **Windows:** `LokiClient-Setup.exe` als Administrator. Der Microsoft-signierte **USBip**-Treiber wird nach „Fertig“ automatisch still installiert (kein zweites Setup-Fenster). Danach **einmal neu starten**.
 - **Linux:** `Loki-Client-linux` → ausführbar machen und starten
 
 ---
@@ -96,7 +96,7 @@ Client (Mac/Win/Linux)
 | `mac/usb-helper/build.sh` | Standalone-Build-Script für den USB-Helper |
 | `build/build_mac.sh` | macOS .app + .dmg Builder (PyInstaller `.spec` + `create-dmg` + USB-Helper) |
 | `build/build_windows.bat` | Windows .exe Builder (PyInstaller + Inno Setup) |
-| `build/fetch_usbip_win.ps1` | Lädt signiertes usbip-win 0.3.5 für das Setup (nicht im Git) |
+| `build/fetch_usbip_win.ps1` | Lädt den usbip-win2-Installer (USBip 0.9.7.7, nicht im Git) |
 | `build/installer.iss` | Windows Installer-Skript (Inno Setup, Admin + usbip.exe install) |
 
 ---
@@ -107,7 +107,8 @@ Client (Mac/Win/Linux)
 |--------|----------|-------------|
 | GET | `/health` | Health-Check (`version` aus `VERSION`) |
 | GET | `/api/status` | CPU, RAM (`used`/`total`), Uptime, unique Shared-Zahl, `version` |
-| GET | `/api/logs?lines=80` | Letzte Server-Logzeilen (1–500) |
+| GET | `/api/logs?lines=80` | Letzte Server-Logzeilen (1–500), zuerst Live-Puffer |
+| POST | `/api/client-log` | Client-Meldung ins Dashboard-Log (`level`, `message`, `bus_id`, `host`) |
 | GET | `/api/devices` | Alle USB-Geräte mit `forward_info` und `is_infrastructure` |
 | GET | `/api/devices/shared` | Nur freigegebene Geräte |
 | POST | `/api/devices/share` | Gerät freigeben (USB/IP + Serial + CUPS) |
@@ -434,7 +435,7 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 | `usbip: error: attacher.exe not found` / UAC „Zulassen“ nicht klickbar | `usbip.exe` sucht `attacher.exe` im Arbeitsverzeichnis (Loki-App), nicht neben sich; Fehlerdialog lag über der UAC | Attach mit `cwd={app}\usbip-win`; kein blockierender Auto-Attach-Dialog |
 | PowerShell-/Konsolenfenster poppt im Sekundentakt auf | `subprocess.run`/`Popen` ohne `CREATE_NO_WINDOW` in einer `--noconsole`-App; Auto-Attach ohne Retry-Bremse | `CREATE_NO_WINDOW` überall; 60s-Backoff pro `bus_id` in `_auto_attach_shared` |
 | Fehlerdialog „Plotter not attached“ nicht wegklickbar / stapelt sich | `_notify` erzeugte pro Aufruf ein neues `tk.Tk()` aus einem Hintergrund-Thread | Native Win32 `MessageBoxW` (thread-sicher, immer klickbar) + Dedup |
-| `usbip: error: vhci driver is not loaded` | usbip-win 0.3.5 nutzt einen test-signierten Treiber; ohne Test-Signing-Modus lädt Windows ihn nicht | Setup aktiviert Test-Signing + Reboot; Client versucht 1× elevated `usbip install`. Bei Secure Boot: im UEFI abschalten |
+| `usbip: error: vhci driver is not loaded` | Altes usbip-win 0.3.5 (2021, Debug) lädt auf aktuellem Windows 11 nicht, auch mit Test-Signing | Ab 1.4.12: offizieller **USBip/usbip-win2**-Installer (attestiert). Nach Loki-Setup USBip durchklicken, neu starten. Bei weiterem Fehler: Speicherintegrität (Core Isolation) aus |
 | Setup: `bcdedit.exe` CreateProcess Code 2 (Datei nicht gefunden) | 32-Bit-Inno-Setup sieht `{sys}` als SysWOW64; `bcdedit` existiert nur in System32 (64-Bit) | `ArchitecturesInstallIn64BitMode=x64`; `bcdedit` per Pascal `Exec` (kein Abbruch wenn es fehlschlägt) |
 | CI: Inno `Identifier expected` in `installer.iss` | `{...}` im `[Code]`-Block ist keine Pascal-Kommentar-Syntax, Inno parsed `{sys}` als Konstante | Nur `//`-Kommentare im `[Code]`-Block |
 
@@ -500,3 +501,4 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-09 | 1.4.9 | **Fix: `vhci driver is not loaded`:** Setup aktiviert Test-Signing (`bcdedit /set testsigning on`) und fordert Reboot — usbip-win 0.3.5 ist test-signiert. Client prüft vor `attach` per `usbip port` ob der VHCI-Treiber geladen ist, versucht sonst 1× elevated `usbip install` (UAC) und zeigt eine klare Anleitung (Test-Signing/Secure-Boot). **Fix: Fehlerdialog:** native Win32 `MessageBoxW` statt tkinter aus Hintergrund-Thread — immer wegklickbar, keine gestapelten Dialoge (Dedup). macOS-Client unverändert. |
 || 2026-09 | 1.4.10 | **Fix: Setup `bcdedit.exe` nicht gefunden (CreateProcess 2):** 32-Bit-Inno-Setup hat `{sys}` nach SysWOW64 umgeleitet. Setup ist jetzt 64-Bit; Test-Signing läuft per Pascal `Exec` und bricht die Installation nicht mehr ab. |
 || 2026-09 | 1.4.11 | **Fix: Inno Setup Compile `Identifier expected`:** `{...}`-Kommentare im `[Code]`-Block werden als Konstanten gelesen (`{sys}`). Jetzt `//`-Kommentare. `build_windows.bat` bricht bei ISCC-Fehler wirklich ab. |
+|| 2026-09 | 1.4.12 | **Windows-Treiber:** usbip-win 0.3.5 durch **usbip-win2 0.9.7.7 (USBip)** ersetzt. Loki-Setup installiert USBip nach Finish **still** (kein zweites Wizard). Client sucht `C:\Program Files\USBip\usbip.exe` zuerst. **Dashboard-Log:** Live-Puffer statt leerer Datei; Windows-Client schickt Attach-Fehler per `POST /api/client-log`. macOS-Client-Pfad unverändert. |

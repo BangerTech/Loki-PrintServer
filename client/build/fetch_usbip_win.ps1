@@ -1,45 +1,20 @@
-# Download attested usbip-win VHCI bits for the Loki Windows installer.
-# Client-only files (no stub / test cert). GPLv3: https://github.com/cezanne/usbip-win
+# Download the official usbip-win2 installer (Microsoft-attestation-signed UDE driver).
+# cezanne/usbip-win 0.3.5 does not load on current Windows 11 ("vhci driver is not loaded").
+# GPLv3: https://github.com/vadimgrn/usbip-win2
 $ErrorActionPreference = "Stop"
 
-$Version = "0.3.5"
-$Url = "https://github.com/cezanne/usbip-win/releases/download/v$Version/usbip-win-$Version.zip"
-$Dest = Join-Path $PSScriptRoot "..\windows\usbip-win"
-$Zip = Join-Path $env:TEMP "usbip-win-$Version.zip"
-$Extract = Join-Path $env:TEMP "usbip-win-$Version"
+# Tag is "v.0.9.7.7" (dot after v). Skip 0.9.7.8 — upstream warns of BSOD.
+$Version = "0.9.7.7"
+$Url = "https://github.com/vadimgrn/usbip-win2/releases/download/v.$Version/USBip-$Version-x64.exe"
+$DestDir = Join-Path $PSScriptRoot "..\windows\usbip-win"
+$Dest = Join-Path $DestDir "USBip-Setup.exe"
 
-Write-Host "[+] Fetching usbip-win $Version ..."
-Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing
+Write-Host "[+] Fetching usbip-win2 $Version (signed UDE driver) ..."
+New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
+Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing
 
-if (Test-Path $Extract) { Remove-Item $Extract -Recurse -Force }
-Expand-Archive -Path $Zip -DestinationPath $Extract -Force
-
-if (Test-Path $Dest) { Remove-Item $Dest -Recurse -Force }
-New-Item -ItemType Directory -Path $Dest | Out-Null
-
-# Attach client + signed VHCI drivers only. Never ship the test PFX or stub kext.
-$Keep = @(
-    "usbip.exe",
-    "attacher.exe",
-    "usb.ids",
-    "usbip_vhci_ude.inf",
-    "usbip_vhci_ude.sys",
-    "usbip_vhci_ude.cat",
-    "usbip_vhci.inf",
-    "usbip_vhci.sys",
-    "usbip_vhci.cat",
-    "usbip_root.inf"
-)
-foreach ($name in $Keep) {
-    $src = Join-Path $Extract $name
-    if (-not (Test-Path $src)) {
-        throw "usbip-win zip missing required file: $name"
-    }
-    Copy-Item $src (Join-Path $Dest $name)
+if (-not (Test-Path $Dest) -or ((Get-Item $Dest).Length -lt 1MB)) {
+    throw "usbip-win2 installer download failed or is too small: $Dest"
 }
 
-if (-not (Test-Path (Join-Path $Dest "usbip.exe"))) {
-    throw "usbip.exe not found after extract"
-}
-
-Write-Host "[+] usbip-win ready: $Dest"
+Write-Host "[+] usbip-win2 installer ready: $Dest"

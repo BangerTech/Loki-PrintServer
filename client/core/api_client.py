@@ -5,6 +5,7 @@ Uses only stdlib (urllib) to avoid httpx/anyio issues in PyInstaller bundles.
 """
 import json
 import logging
+import platform
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
@@ -137,6 +138,18 @@ class LokiAPIClient:
         except Exception as e:
             log.debug("get_forward_info %s: %s", bus_id, e)
             return None
+
+    def report_event(self, level: str, message: str, bus_id: str = "") -> None:
+        """Send a line to the server dashboard live log."""
+        try:
+            self._post_json("/api/client-log", {
+                "level": level,
+                "message": message,
+                "bus_id": bus_id,
+                "host": platform.node(),
+            })
+        except Exception as e:
+            log.debug("report_event failed: %s", e)
 
     def set_attach_mode(self, bus_id: str, mode: str) -> dict | None:
         """Switch raw-USB devices between 'usbip' (Windows) and 'bridge' (macOS)."""

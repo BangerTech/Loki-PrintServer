@@ -39,10 +39,10 @@ if not exist "dist\LokiClient.exe" (
 )
 echo [+] EXE created: dist\LokiClient.exe
 
-echo [+] Fetching bundled usbip-win driver...
+echo [+] Fetching bundled usbip-win2 installer...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0fetch_usbip_win.ps1"
-if not exist "windows\usbip-win\usbip.exe" (
-    echo [!] ERROR: usbip-win not downloaded
+if not exist "windows\usbip-win\USBip-Setup.exe" (
+    echo [!] ERROR: usbip-win2 installer not downloaded
     exit /b 1
 )
 

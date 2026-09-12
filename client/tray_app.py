@@ -641,6 +641,16 @@ class LokiPystrayApp:
     # Minimum seconds between auto-attach retries for the same device.
     _ATTACH_RETRY_SECS = 60.0
 
+    def _report_attach(self, conn: ServerConnection, dev: DeviceInfo, result):
+        if not conn.client:
+            return
+        ok = result.status == AttachStatus.ATTACHED
+        conn.client.report_event(
+            "info" if ok else "error",
+            f"Windows attach {dev.display_name}: {result.status.value} — {result.message}",
+            bus_id=dev.bus_id,
+        )
+
     def _auto_attach_shared(self, conn: ServerConnection):
         if self.attacher.is_attaching():
             log.debug("Attach already in progress (password dialog?), skipping auto-attach")
@@ -666,6 +676,7 @@ class LokiPystrayApp:
                                          usb_info=_usb_info(dev))
             log.info("pystray auto-attach %s → %s (%s)",
                      dev.bus_id, result.status, result.local_device)
+            self._report_attach(conn, dev, result)
             if result.status != AttachStatus.ATTACHED:
                 self._attach_failed_at[dev.bus_id] = now
                 self._attach_warned.add(dev.bus_id)
@@ -805,6 +816,7 @@ class LokiPystrayApp:
             result = self.attacher.attach(conn.entry.host, dev.bus_id,
                                           forward_info=fwd_info,
                                           usb_info=_usb_info(dev))
+            self._report_attach(conn, dev, result)
             if result.status != AttachStatus.ATTACHED:
                 _notify("Loki-Client — Plotter not attached", result.message)
         conn.refresh()

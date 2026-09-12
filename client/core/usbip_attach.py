@@ -569,32 +569,35 @@ class DeviceAttacher:
     def _attach_usbip_windows(self, server_ip: str, bus_id: str) -> AttachResult:
         exe = self._find_usbip_win()
         if not exe:
+            setup = self._find_usbip_setup()
+            if setup:
+                self._ensure_vhci_driver(setup)
             return AttachResult(
                 AttachStatus.ERROR,
                 message=(
-                    "USB/IP driver not found.\n\n"
-                    "Re-run LokiClient-Setup.exe and accept the Administrator prompt "
-                    "so the bundled usbip-win driver can be installed.\n\n"
-                    "FineCut will then see the plotter as a local USB device."
+                    "USB/IP is not installed.\n\n"
+                    "Run USBip-Setup.exe from the Loki-Client folder "
+                    "(usbip-win\\USBip-Setup.exe), finish that installer, "
+                    "then restart Windows.\n\n"
+                    "Windows FineCut needs a real local USB device. "
+                    "This signed USBip driver provides it."
                 ),
             )
-        # The VHCI kernel driver must be loaded before we can attach. If it isn't,
-        # a bare "usbip attach" just errors with "vhci driver is not loaded".
         if not self._vhci_driver_loaded(exe):
-            log.warning("VHCI driver not loaded — attempting to load/install it")
+            log.warning("VHCI driver not loaded — launching USBip installer")
             self._ensure_vhci_driver(exe)
+            exe = self._find_usbip_win() or exe
             if not self._vhci_driver_loaded(exe):
                 return AttachResult(
                     AttachStatus.ERROR,
                     message=(
-                        "USB/IP driver (VHCI) is not loaded.\n\n"
-                        "Confirm the Windows Administrator prompt to install it.\n\n"
-                        "If it still fails, the driver needs Windows Test-Signing mode "
-                        "(usbip-win uses a test-signed driver):\n"
-                        "  1. Open PowerShell as Administrator\n"
-                        "  2. bcdedit /set testsigning on\n"
-                        "  3. Restart Windows, then start Loki-Client again.\n\n"
-                        "Note: Secure Boot must be OFF for test-signing to work."
+                        "USB/IP driver is not loaded.\n\n"
+                        "1. Run USBip-Setup.exe (Loki-Client\\usbip-win) as Administrator\n"
+                        "2. Restart Windows once\n"
+                        "3. If it still fails: Windows Security → Device security → "
+                        "Core isolation → Memory integrity OFF, then reboot.\n\n"
+                        "Do not use the old usbip-win 0.3.5 stack — it does not load "
+                        "on current Windows 11."
                     ),
                 )
 
@@ -623,28 +626,46 @@ class DeviceAttacher:
         combined = ((r.stdout or "") + (r.stderr or "")).lower()
         return "not loaded" not in combined
 
-    def _ensure_vhci_driver(self, exe: str) -> None:
-        """Try to install/load the VHCI driver, elevating via UAC exactly once."""
+    def _ensure_vhci_driver(self, exe_or_setup: str) -> None:
+        """Launch the official USBip installer once (UAC). Do not run cezanne 'usbip install'."""
         if self._vhci_install_attempted:
             return
         self._vhci_install_attempted = True
-        folder = os.path.dirname(os.path.abspath(exe))
+        setup = self._find_usbip_setup()
+        if not setup:
+            log.error("USBip-Setup.exe not found next to Loki-Client")
+            return
+        folder = os.path.dirname(os.path.abspath(setup))
         try:
             import ctypes
 
-            # ShellExecuteW with the "runas" verb raises the UAC prompt. nShowCmd=0
-            # (SW_HIDE) keeps usbip's own console hidden; the UAC dialog still shows.
             rc = ctypes.windll.shell32.ShellExecuteW(
-                None, "runas", exe, "install", folder, 0
+                None, "runas", setup, "", folder, 1
             )
             if rc <= 32:
-                log.error("Elevated 'usbip install' could not start (rc=%s)", rc)
+                log.error("USBip-Setup.exe could not start (rc=%s)", rc)
                 return
         except Exception as e:
-            log.error("Elevated 'usbip install' failed: %s", e)
+            log.error("USBip-Setup.exe failed: %s", e)
             return
-        # Give the PnP subsystem a moment to load the freshly installed driver.
-        time.sleep(3)
+        time.sleep(2)
+
+    def _find_usbip_setup(self) -> str | None:
+        candidates: list[str] = []
+        if getattr(sys, "frozen", False):
+            candidates.append(os.path.join(
+                os.path.dirname(sys.executable), "usbip-win", "USBip-Setup.exe"
+            ))
+        here = os.path.dirname(os.path.abspath(__file__))
+        candidates.append(os.path.normpath(
+            os.path.join(here, "..", "windows", "usbip-win", "USBip-Setup.exe")
+        ))
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        candidates.append(os.path.join(pf, "Loki-Client", "usbip-win", "USBip-Setup.exe"))
+        for p in candidates:
+            if p and os.path.isfile(p):
+                return p
+        return None
 
     def _attach_usbip_macos(self, server_ip: str, bus_id: str) -> AttachResult:
         if shutil.which("limactl"):
@@ -677,7 +698,14 @@ class DeviceAttacher:
         return AttachResult(AttachStatus.DETACHED, message="USB/IP detached")
 
     def _find_usbip_win(self) -> str | None:
-        candidates: list[str] = []
+        """Prefer usbip-win2 (USBip) over leftover cezanne 0.3.5 binaries."""
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        candidates: list[str] = [
+            os.path.join(pf, "USBip", "usbip.exe"),
+            os.path.join(pf, "USBip-Win2", "usbip.exe"),
+            r"C:\Program Files\USBip\usbip.exe",
+            r"C:\Program Files\USBip-Win2\usbip.exe",
+        ]
         if getattr(sys, "frozen", False):
             candidates.append(os.path.join(
                 os.path.dirname(sys.executable), "usbip-win", "usbip.exe"
@@ -690,20 +718,8 @@ class DeviceAttacher:
             found = shutil.which(name)
             if found:
                 candidates.append(found)
-        candidates.extend((
-            r"C:\Program Files\usbip-win\usbip.exe",
-            r"C:\Program Files\USBip-Win2\usbip.exe",
-            r"C:\Program Files (x86)\usbip-win\usbip.exe",
-            r"C:\usbip-win\usbip.exe",
-            r"C:\usbip-win2\usbip.exe",
-        ))
         for p in candidates:
-            if not p or not os.path.exists(p):
-                continue
-            if os.path.exists(os.path.join(os.path.dirname(p), "attacher.exe")):
-                return p
-        for p in candidates:
-            if p and os.path.exists(p):
+            if p and os.path.isfile(p):
                 return p
         return None
 

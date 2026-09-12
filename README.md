@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.4.11-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.4.12-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/server-Raspberry%20Pi-red?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/clients-macOS%20%7C%20Windows%20%7C%20Linux-blueviolet?style=flat-square" alt="Clients">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
@@ -102,7 +102,7 @@ Download the latest client for your platform from **[GitHub Releases](https://gi
 **Client:**
 - macOS 11+, Windows 10+, or Linux
 - macOS cutting plotters: **AMFI must be disabled** for virtual USB device support (see below)
-- Windows: [usbip-win](https://github.com/cezanne/usbip-win/releases) for full USB passthrough
+- Windows: [usbip-win2 / USBip](https://github.com/vadimgrn/usbip-win2) for full USB passthrough (bundled)
 
 ---
 
