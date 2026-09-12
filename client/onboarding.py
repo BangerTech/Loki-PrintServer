@@ -6,7 +6,7 @@ import logging
 import sys
 import threading
 import tkinter as tk
-from typing import Callable, Optional
+from collections.abc import Callable
 
 try:
     import customtkinter as ctk
@@ -55,9 +55,9 @@ class OnboardingWindow:
         self.on_complete = on_complete
         self._discovery = LokiDiscovery(on_found=self._on_server_found)
         self._discovered: list[DiscoveredServer] = []
-        self._selected: Optional[DiscoveredServer] = None
+        self._selected: DiscoveredServer | None = None
         self._step = 0
-        self._next_btn_ref: Optional[tk.Button] = None
+        self._next_btn_ref: tk.Button | None = None
 
         self._build()
         self._discovery.start()
@@ -425,7 +425,7 @@ class OnboardingWindow:
     # ── Shared helpers ────────────────────────────────────────────────────────
 
     def _nav_buttons(self, back, next_text: str, next_cmd,
-                     next_enabled: bool = True) -> Optional[tk.Button]:
+                     next_enabled: bool = True) -> tk.Button | None:
         nav = tk.Frame(self.container, bg=BG)
         nav.pack(side=tk.BOTTOM, fill=tk.X, padx=40, pady=18)
 

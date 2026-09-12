@@ -1,7 +1,7 @@
 """
 Loki-PrintServer - Data Models
 """
-from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -9,16 +9,16 @@ class DeviceInfo(BaseModel):
     bus_id: str
     vendor_id: str
     product_id: str
-    manufacturer: Optional[str] = None
-    product: Optional[str] = None
-    serial: Optional[str] = None
-    device_class: Optional[str] = None
-    speed: Optional[str] = None
+    manufacturer: str | None = None
+    product: str | None = None
+    serial: str | None = None
+    device_class: str | None = None
+    speed: str | None = None
     is_shared: bool = False
     is_infrastructure: bool = False
-    client_ip: Optional[str] = None
-    forward_info: Optional[dict] = None
-    custom_name: Optional[str] = None
+    client_ip: str | None = None
+    forward_info: dict | None = None
+    custom_name: str | None = None
 
 
 class RenameRequest(BaseModel):
@@ -38,7 +38,7 @@ class ConnectedClient(BaseModel):
     port: int
     bus_id: str
     connected_at: str
-    device_info: Optional[DeviceInfo] = None
+    device_info: DeviceInfo | None = None
 
 
 class ServerStatus(BaseModel):

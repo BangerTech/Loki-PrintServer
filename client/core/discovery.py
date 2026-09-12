@@ -5,7 +5,7 @@ Finds Loki-PrintServer instances on the local network automatically.
 import socket
 import threading
 from dataclasses import dataclass
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 
@@ -35,13 +35,13 @@ class DiscoveredServer:
 class LokiDiscovery:
     """Discover Loki-PrintServer instances on the local network via mDNS."""
 
-    def __init__(self, on_found: Optional[Callable[[DiscoveredServer], None]] = None,
-                 on_lost: Optional[Callable[[DiscoveredServer], None]] = None):
+    def __init__(self, on_found: Callable[[DiscoveredServer], None] | None = None,
+                 on_lost: Callable[[DiscoveredServer], None] | None = None):
         self._on_found = on_found
         self._on_lost = on_lost
         self._servers: dict[str, DiscoveredServer] = {}
-        self._zeroconf: Optional[Zeroconf] = None
-        self._browser: Optional[ServiceBrowser] = None
+        self._zeroconf: Zeroconf | None = None
+        self._browser: ServiceBrowser | None = None
         self._lock = threading.Lock()
 
     def start(self):

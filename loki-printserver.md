@@ -57,6 +57,10 @@ Client (Mac/Win/Linux)
 
 ## Dateien
 
+| Datei | Beschreibung |
+|-------|-------------|
+| `ruff.toml` | CI-Lint-Regeln (`E4`/`E7`/`E9`, `F`, `UP`) — verhindert Default-Ausweitung neuer Ruff-Versionen |
+
 ### Server (`server/`)
 
 | Datei | Beschreibung |
@@ -374,6 +378,8 @@ Der Release-Job löscht den bestehenden GitHub-Release via `gh release delete` b
 
 Die Jobs **Lint & Test Server** und **Lint & Test Client** führen u. a. `ruff check server/api/` bzw. `ruff check client/` aus. Schlägt Ruff fehl, endet der Job **sofort** (oft nach wenigen Sekunden) — das ist dann ein **Lint-Problem im Code**, nicht automatisch ein „Minuten-Budget“-Thema.
 
+Die Regelmenge steht in `ruff.toml` (`E4`/`E7`/`E9`, `F`, `UP`). Ohne diese Datei übernimmt ein aktuelles Ruff (0.16+) sehr viele Extra-Regeln (BLE, S, ASYNC, …) und CI scheitert an Dutzenden Hinweisen.
+
 Wenn GitHub stattdessen meldet, dass der Job **gar nicht gestartet** wurde (*recent account payments have failed* / *spending limit*), liegt es an **Billing** (Zahlungsmittel, offene Rechnungen, Actions-Spending-Limit): **Settings → Billing and plans** (bzw. Organisation → Billing).
 
 Lokal prüfen (Python 3.12 empfohlen, wie im Workflow):
@@ -472,3 +478,4 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-04 | 1.4.2 | **Fix: CDC-ACM Device Name**: macOS `AppleUSBACMData` Treiber nutzt die USB-Seriennummer für den `/dev/cu.usbmodem<name>` Pfad nur wenn sie ≤ 8 ASCII-Zeichen hat (Quellcode-Analyse des Apple CDC-Treibers). Längere Namen verursachen Fallback auf Location-ID-Naming (z.B. `usbmodem89101`). Fix: `CDCACMDevice.swift` und `usbip_attach.py` kürzen den Device-Name auf max 8 Zeichen. Beispiel: `Vevor135Plotter` → `Vevor135` → `/dev/cu.usbmodemVevor1351`. |
 || 2026-04 | — | **CI / Doku:** Ruff-Fixes (`F541` überflüssige `f`-Strings in `usbip_attach.py`; `F401`/`F811`/`F541` in `usb_bridge.py`). `loki-printserver.md`: Abschnitt CI/Lint + Billing-Hinweis. README: Lizenzblock ohne Third-Party-Disclaimer-Zeile. |
 || 2026-09 | 1.4.4 | **Fix: Windows Installer + Tray:** Desktop-Shortcut `{commondesktop}` → `{autodesktop}` (kein `0x80070005` mehr auf `C:\Users\Public\Desktop`). pystray-Callbacks über `_pystray_action()` gewrappt — Tray startet wieder (`ValueError` durch >2 Positionsargumente). |
+|| 2026-09 | — | **CI / Ruff:** `ruff.toml` mit fester Regelmenge (E/F/UP). `Optional[X]` → `X \| None` in Server- und Client-Code. Verhindert den 76-Fehler-Break durch Ruff 0.16-Defaults (UP045, BLE001, S110, …). |

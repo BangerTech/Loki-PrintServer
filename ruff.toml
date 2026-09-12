@@ -1,0 +1,10 @@
+# Explicit rule set so `pip install ruff` (latest) cannot break CI
+# when Ruff expands its defaults (0.16+ enabled BLE/S/ASYNC/…).
+target-version = "py312"
+
+[lint]
+select = [
+    "E4", "E7", "E9",  # pycodestyle
+    "F",               # pyflakes
+    "UP",              # pyupgrade (e.g. Optional[X] → X | None)
+]

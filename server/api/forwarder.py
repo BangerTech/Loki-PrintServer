@@ -18,7 +18,6 @@ import shutil
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("loki-printserver.forwarder")
 
@@ -33,11 +32,11 @@ STATE_FILE = Path(os.getenv("LOKI_DATA_DIR", "/etc/loki-printserver")) / "shared
 class ForwardState:
     bus_id: str
     usbip_shared: bool = False
-    serial_port: Optional[int] = None
-    serial_proc: Optional[asyncio.subprocess.Process] = None
-    serial_dev: Optional[str] = None  # e.g. /dev/ttyUSB0
+    serial_port: int | None = None
+    serial_proc: asyncio.subprocess.Process | None = None
+    serial_dev: str | None = None  # e.g. /dev/ttyUSB0
     ipp_shared: bool = False
-    cups_name: Optional[str] = None
+    cups_name: str | None = None
     # Metadata saved for auto-restore
     device_class: str = ""
     vendor_id: str = ""
@@ -103,12 +102,12 @@ class ForwardingManager:
             self.save_state()
 
     async def share_device(self, bus_id: str, device_class: str,
-                           serial_dev: Optional[str] = None,
+                           serial_dev: str | None = None,
                            vendor_id: str = "", product_id: str = "",
                            product_name: str = "",
                            auto_share: bool = False):
         """Enable all applicable forwarding for a device."""
-        from .usb_bridge import needs_raw_usb, USBBridge
+        from .usb_bridge import USBBridge, needs_raw_usb
 
         state = self._states.setdefault(bus_id, ForwardState(bus_id=bus_id))
         state.device_class = device_class
@@ -199,7 +198,7 @@ class ForwardingManager:
         if persist:
             self.save_state()
 
-    def get_state(self, bus_id: str) -> Optional[ForwardState]:
+    def get_state(self, bus_id: str) -> ForwardState | None:
         return self._states.get(bus_id)
 
     def get_all_shared(self) -> list[ForwardState]:
@@ -256,7 +255,7 @@ class ForwardingManager:
             await proc.communicate()
         state.usbip_shared = False
 
-    async def _resolve_usbip_busid(self, bus_id: str) -> Optional[str]:
+    async def _resolve_usbip_busid(self, bus_id: str) -> str | None:
         """Map a pyusb bus_id (bus-address) to the sysfs busid used by usbip.
 
         Looks up the device's sysfs path by matching busnum/devnum from
@@ -326,7 +325,7 @@ class ForwardingManager:
             state.serial_proc.terminate()
             try:
                 await asyncio.wait_for(state.serial_proc.wait(), timeout=3)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 state.serial_proc.kill()
         state.serial_proc = None
         state.serial_port = None
@@ -395,7 +394,7 @@ class ForwardingManager:
             state.ipp_shared = False
             state.cups_name = None
 
-    async def _find_cups_uri(self, bus_id: str) -> Optional[str]:
+    async def _find_cups_uri(self, bus_id: str) -> str | None:
         """Find CUPS device URI matching a USB bus_id."""
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -415,7 +414,7 @@ class ForwardingManager:
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
-    def _find_serial_device(self, bus_id: str) -> Optional[str]:
+    def _find_serial_device(self, bus_id: str) -> str | None:
         """Find /dev/ttyUSB* or /dev/ttyACM* for a given bus_id.
 
         The bus_id is in pyusb format 'bus-address' (e.g. '1-4').
@@ -450,7 +449,7 @@ class ForwardingManager:
         return None
 
     async def _try_bind_usbserial(self, bus_id: str, vendor_id: str,
-                                    product_id: str) -> Optional[str]:
+                                    product_id: str) -> str | None:
         """Bind a native USB device to the generic usbserial driver.
 
         Some devices (e.g. Mimaki CG-SR) use vendor-specific USB with bulk

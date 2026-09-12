@@ -3,7 +3,6 @@ Loki-PrintServer - USB Device Name Database
 Maps vendor:product IDs to human-readable names.
 Focused on plotters, printers and common USB-serial adapters.
 """
-from typing import Optional
 
 # Format: "vendor_id:product_id" -> ("Manufacturer", "Product Name", icon)
 KNOWN_DEVICES: dict[str, tuple[str, str, str]] = {
@@ -97,7 +96,7 @@ CLASS_NAMES: dict[int, tuple[str, str]] = {
 }
 
 
-def lookup_device(vendor_id: str, product_id: str) -> Optional[tuple[str, str, str]]:
+def lookup_device(vendor_id: str, product_id: str) -> tuple[str, str, str] | None:
     """
     Look up a device by vendor:product ID.
     Returns (manufacturer, product_name, icon) or None if unknown.
@@ -107,7 +106,7 @@ def lookup_device(vendor_id: str, product_id: str) -> Optional[tuple[str, str, s
 
 
 def get_display_name(vendor_id: str, product_id: str,
-                     manufacturer: Optional[str], product: Optional[str],
+                     manufacturer: str | None, product: str | None,
                      device_class_id: int = 0xFF) -> tuple[str, str, str]:
     """
     Returns (manufacturer_display, product_display, icon) with best available info.

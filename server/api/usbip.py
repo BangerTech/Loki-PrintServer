@@ -6,7 +6,6 @@ import asyncio
 import logging
 import re
 import subprocess
-from typing import Optional
 
 import usb.core
 import usb.util
@@ -96,7 +95,7 @@ def _run(cmd: list[str], check=True) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, check=check)
 
 
-def _get_string_safe(dev, index) -> Optional[str]:
+def _get_string_safe(dev, index) -> str | None:
     if index == 0:
         return None
     try:
@@ -108,7 +107,7 @@ def _get_string_safe(dev, index) -> Optional[str]:
 class USBIPManager:
     def __init__(self):
         self._shared_bus_ids: set[str] = set()
-        self._daemon_proc: Optional[asyncio.subprocess.Process] = None
+        self._daemon_proc: asyncio.subprocess.Process | None = None
 
     async def start(self):
         """Load kernel modules and start usbipd daemon."""
@@ -237,7 +236,7 @@ class USBIPManager:
         self._shared_bus_ids.discard(bus_id)
         logger.info(f"Stopped sharing device {bus_id}")
 
-    async def _resolve_usbip_busid(self, bus_id: str) -> Optional[str]:
+    async def _resolve_usbip_busid(self, bus_id: str) -> str | None:
         """Convert 'bus-address' format to usbip 'bus-port' format."""
         try:
             result = _run(["usbip", "list", "--local"], check=False)

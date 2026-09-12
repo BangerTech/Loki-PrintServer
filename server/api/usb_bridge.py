@@ -30,7 +30,6 @@ import logging
 import struct
 import threading
 import time
-from typing import Optional
 
 logger = logging.getLogger("loki-printserver.usb-bridge")
 
@@ -61,7 +60,7 @@ class USBBridge:
         self._ep_out = None
         self._ep_in = None
         self._running = False
-        self._client_writer: Optional[asyncio.StreamWriter] = None
+        self._client_writer: asyncio.StreamWriter | None = None
         self._lock = threading.Lock()
 
     async def start(self):

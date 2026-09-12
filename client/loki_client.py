@@ -12,7 +12,6 @@ import threading
 import time
 import tkinter as tk
 from tkinter import messagebox
-from typing import Optional
 
 try:
     import customtkinter as ctk
@@ -53,16 +52,16 @@ DEVICE_ICONS = {
 
 
 class LokiClientApp:
-    def __init__(self, initial_server: Optional[str] = None, initial_port: int = 7576):
-        self.api: Optional[LokiAPIClient] = None
+    def __init__(self, initial_server: str | None = None, initial_port: int = 7576):
+        self.api: LokiAPIClient | None = None
         self.attacher = USBIPAttacher()
         self.discovery = LokiDiscovery(
             on_found=self._on_server_discovered,
             on_lost=self._on_server_lost,
         )
         self._devices: list[DeviceInfo] = []
-        self._status: Optional[ServerStatus] = None
-        self._poll_thread: Optional[threading.Thread] = None
+        self._status: ServerStatus | None = None
+        self._poll_thread: threading.Thread | None = None
         self._running = False
 
         self._build_ui()
@@ -420,7 +419,7 @@ class LokiClientApp:
                     self.root.after(0, lambda: self.conn_dot.configure(fg=COLORS["danger"]))
             time.sleep(5)
 
-    def _on_poll(self, devices: list[DeviceInfo], status: Optional[ServerStatus]):
+    def _on_poll(self, devices: list[DeviceInfo], status: ServerStatus | None):
         self._devices = devices
         self._status = status
         self._render_devices()

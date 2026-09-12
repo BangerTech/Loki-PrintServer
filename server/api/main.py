@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from .discovery import MDNSAnnouncer
+from .forwarder import ForwardingManager
 from .models import (
     ConnectedClient,
     DeviceInfo,
@@ -26,8 +28,6 @@ from .models import (
     UnshareRequest,
 )
 from .usbip import USBIPManager
-from .discovery import MDNSAnnouncer
-from .forwarder import ForwardingManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("loki-printserver")

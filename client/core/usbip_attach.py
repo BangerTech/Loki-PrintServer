@@ -20,7 +20,6 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 log = logging.getLogger("loki.attach")
 
@@ -43,9 +42,9 @@ class AttachMethod(Enum):
 @dataclass
 class AttachResult:
     status: AttachStatus
-    method: Optional[AttachMethod] = None
+    method: AttachMethod | None = None
     message: str = ""
-    local_device: Optional[str] = None  # /dev/ttyUSB0, COM3, printer name
+    local_device: str | None = None  # /dev/ttyUSB0, COM3, printer name
 
 
 def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -62,15 +61,15 @@ class _PtyBridge:
     """
 
     def __init__(self):
-        self._master_fd: Optional[int] = None
-        self._slave_fd: Optional[int] = None
-        self._sock: Optional[socket.socket] = None
+        self._master_fd: int | None = None
+        self._slave_fd: int | None = None
+        self._sock: socket.socket | None = None
         self._running = False
-        self.device_path: Optional[str] = None
+        self.device_path: str | None = None
         self._links: list[str] = []
 
     def start(self, server_ip: str, tcp_port: int,
-              link: str, fallback_link: Optional[str] = None) -> str:
+              link: str, fallback_link: str | None = None) -> str:
         """
         Connect to server_ip:tcp_port and expose as a PTY.
         Tries `link` first (e.g. /dev/cu.loki-*), falls back to
@@ -177,12 +176,12 @@ class _USBHelperBridge:
     _starting_ports: set = set()  # guard against concurrent starts per port
 
     def __init__(self):
-        self._proc: Optional[subprocess.Popen] = None
-        self.device_path: Optional[str] = None
+        self._proc: subprocess.Popen | None = None
+        self.device_path: str | None = None
         self._tcp_port: int = 0
 
     @staticmethod
-    def find_helper() -> Optional[str]:
+    def find_helper() -> str | None:
         """Locate the loki-usb-helper binary."""
         candidates = []
         if getattr(sys, "frozen", False):
@@ -260,7 +259,7 @@ class _USBHelperBridge:
               vendor_id: str = "", product_id: str = "",
               manufacturer: str = "", product_name: str = "",
               device_name: str = "",
-              usb_mode: str = "") -> Optional[str]:
+              usb_mode: str = "") -> str | None:
         if tcp_port in _USBHelperBridge._starting_ports:
             log.debug("loki-usb-helper already starting for port %s, skipping", tcp_port)
             return None
@@ -368,7 +367,7 @@ class _USBHelperBridge:
         return None
 
     def _wait_for_device(self, existing: set, timeout: int = 15,
-                         mode: str = "cdc") -> Optional[str]:
+                         mode: str = "cdc") -> str | None:
         if mode == "vendor":
             # Vendor mode: no serial port — just wait for helper to stabilize
             for _ in range(min(timeout, 8) * 2):
@@ -436,8 +435,8 @@ class DeviceAttacher:
             _USBHelperBridge.kill_stale_helpers()
 
     def attach(self, server_ip: str, bus_id: str,
-               forward_info: Optional[dict] = None,
-               usb_info: Optional[dict] = None) -> AttachResult:
+               forward_info: dict | None = None,
+               usb_info: dict | None = None) -> AttachResult:
         """
         Attach a remote USB device. Tries the best method for this platform:
           - Linux/Windows: USB/IP first, then serial fallback
@@ -518,7 +517,7 @@ class DeviceAttacher:
         """True if a USB helper is currently waiting for user input (password dialog)."""
         return bool(_USBHelperBridge._starting_ports)
 
-    def get_attach_info(self, bus_id: str) -> Optional[AttachResult]:
+    def get_attach_info(self, bus_id: str) -> AttachResult | None:
         return self._attached.get(bus_id)
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -583,7 +582,7 @@ class DeviceAttacher:
                   f"sudo usbip detach -b {bus_id}"])
         return AttachResult(AttachStatus.DETACHED, message="USB/IP detached")
 
-    def _find_usbip_win(self) -> Optional[str]:
+    def _find_usbip_win(self) -> str | None:
         for name in ("usbip.exe", "usbip-win.exe"):
             if shutil.which(name):
                 return shutil.which(name)
@@ -599,7 +598,7 @@ class DeviceAttacher:
 
     def _attach_serial_macos(self, server_ip: str, serial_info: dict,
                              bus_id: str = "",
-                             usb_info: Optional[dict] = None) -> AttachResult:
+                             usb_info: dict | None = None) -> AttachResult:
         port = serial_info.get("port")
         if not port:
             return AttachResult(AttachStatus.ERROR, message="No serial port info from server")
@@ -809,7 +808,7 @@ class DeviceAttacher:
             local_device=uri,
         )
 
-    def _detach_ipp(self, printer_name: Optional[str]) -> AttachResult:
+    def _detach_ipp(self, printer_name: str | None) -> AttachResult:
         if printer_name:
             if OS in ("Linux", "Darwin"):
                 _run(["lpadmin", "-x", printer_name])
@@ -820,7 +819,7 @@ class DeviceAttacher:
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
-    def _find_new_device(self) -> Optional[str]:
+    def _find_new_device(self) -> str | None:
         time.sleep(1)
         for pattern in ("/dev/ttyUSB*", "/dev/ttyACM*", "/dev/usb/lp*"):
             matches = sorted(glob.glob(pattern))

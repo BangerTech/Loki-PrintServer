@@ -34,7 +34,6 @@ import threading  # noqa: E402
 import time  # noqa: E402
 import traceback  # noqa: E402
 import webbrowser  # noqa: E402
-from typing import Optional  # noqa: E402
 
 from core.logger import setup_logging  # noqa: E402
 
@@ -73,7 +72,7 @@ def _usb_info(dev: DeviceInfo) -> dict:
     }
 
 
-def make_tray_icon(connected: bool = False, size: int = 64) -> "Image.Image":
+def make_tray_icon(connected: bool = False, size: int = 64) -> Image.Image:
     """Load the real logo icon, fall back to generated if not found."""
     from PIL import Image, ImageDraw
     import pathlib
@@ -111,11 +110,11 @@ def make_tray_icon(connected: bool = False, size: int = 64) -> "Image.Image":
 class ServerConnection:
     def __init__(self, entry: ServerEntry):
         self.entry = entry
-        self.client: Optional[LokiAPIClient] = None
+        self.client: LokiAPIClient | None = None
         self.devices: list[DeviceInfo] = []
-        self.status: Optional[ServerStatus] = None
+        self.status: ServerStatus | None = None
         self.connected = False
-        self.error: Optional[str] = None
+        self.error: str | None = None
 
     def try_connect(self, retries: int = 3, delay: float = 2.0) -> bool:
         log.info("Connecting to %s:%s (retries=%d, delay=%.1fs)",
@@ -752,7 +751,7 @@ def _acquire_lock() -> bool:
         _lock_fd.write(str(os.getpid()))
         _lock_fd.flush()
         return True
-    except (OSError, IOError):
+    except OSError:
         return False
 
 

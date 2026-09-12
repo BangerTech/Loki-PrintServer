@@ -4,7 +4,6 @@ Announces the server on the local network so clients can find it automatically.
 """
 import logging
 import socket
-from typing import Optional
 
 from zeroconf import ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
@@ -17,8 +16,8 @@ SERVICE_TYPE = "_lokiprint._tcp.local."
 
 class MDNSAnnouncer:
     def __init__(self):
-        self._zeroconf: Optional[AsyncZeroconf] = None
-        self._service_info: Optional[ServiceInfo] = None
+        self._zeroconf: AsyncZeroconf | None = None
+        self._service_info: ServiceInfo | None = None
 
     async def start(self, service_name: str, port: int):
         """Register the service via mDNS so clients can auto-discover it."""

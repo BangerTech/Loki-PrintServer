@@ -7,7 +7,6 @@ import json
 import logging
 import urllib.request
 import urllib.error
-from typing import Optional
 from dataclasses import dataclass
 
 log = logging.getLogger("loki.api")
@@ -18,16 +17,16 @@ class DeviceInfo:
     bus_id: str
     vendor_id: str
     product_id: str
-    manufacturer: Optional[str]
-    product: Optional[str]
-    serial: Optional[str]
-    device_class: Optional[str]
-    speed: Optional[str]
+    manufacturer: str | None
+    product: str | None
+    serial: str | None
+    device_class: str | None
+    speed: str | None
     is_shared: bool
     is_infrastructure: bool = False
-    client_ip: Optional[str] = None
-    forward_info: Optional[dict] = None
-    custom_name: Optional[str] = None
+    client_ip: str | None = None
+    forward_info: dict | None = None
+    custom_name: str | None = None
 
     @property
     def display_name(self) -> str:
@@ -105,7 +104,7 @@ class LokiAPIClient:
             log.warning("Health FAIL %s:%s → %s", self.host, self.port, e)
             return False
 
-    def get_status(self) -> Optional[ServerStatus]:
+    def get_status(self) -> ServerStatus | None:
         try:
             data = self._get("/api/status")
             return ServerStatus.from_dict(data)
@@ -132,7 +131,7 @@ class LokiAPIClient:
             log.error("share_device %s failed: %s", bus_id, e)
             return False, str(e)
 
-    def get_forward_info(self, bus_id: str) -> Optional[dict]:
+    def get_forward_info(self, bus_id: str) -> dict | None:
         try:
             return self._get(f"/api/devices/{bus_id}/forward")
         except Exception as e:
