@@ -143,7 +143,15 @@ def make_tray_icon(connected: bool = False, size: int = 64) -> Image.Image:
         try:
             img = Image.open(candidate.resolve()).resize((size, size), Image.LANCZOS)
             if not connected:
-                img = img.convert("LA").convert("RGBA")  # greyscale when disconnected
+                img = img.convert("LA").convert("RGBA")  # greyscale when no device attached
+            else:
+                img = img.convert("RGBA")
+                draw = ImageDraw.Draw(img)
+                r = max(size // 6, 7)
+                draw.ellipse(
+                    [size - r - 2, size - r - 2, size - 2, size - 2],
+                    fill=(0, 229, 160, 255),
+                )
             return img
         except Exception:
             continue
@@ -773,8 +781,10 @@ class LokiPystrayApp:
         return pystray.Menu(*items)
 
     def _refresh_icon(self):
-        connected = any(c.connected for c in self.connections.values())
-        self._icon.icon = make_tray_icon(connected)
+        # Green = at least one device actually attached (not merely server reachable).
+        attached = bool(self.attacher.get_attached())
+        self._icon.icon = make_tray_icon(attached)
+        self._icon.visible = True
         self._icon.menu = self._build_menu()
 
     def _prepare_windows_attach(self, conn: ServerConnection,
@@ -839,6 +849,7 @@ class LokiPystrayApp:
     def _poll_loop(self):
         while self._running:
             changed = False
+            old_attached = tuple(self.attacher.get_attached())
             for conn in list(self.connections.values()):
                 was_connected = conn.connected
                 old_devices = [(d.bus_id, d.is_shared) for d in conn.devices]
@@ -851,6 +862,8 @@ class LokiPystrayApp:
                 new_devices = [(d.bus_id, d.is_shared) for d in conn.devices]
                 if conn.connected != was_connected or old_devices != new_devices:
                     changed = True
+            if tuple(self.attacher.get_attached()) != old_attached:
+                changed = True
             if changed:
                 self._refresh_icon()
             time.sleep(5)
