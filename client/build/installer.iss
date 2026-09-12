@@ -1,7 +1,7 @@
 ; Loki-PrintServer Windows Installer (Inno Setup)
 ; NOTE: All paths are relative to the location of this .iss file (client/build/)
 #define MyAppName "Loki-Client"
-#define MyAppVersion "1.4.6"
+#define MyAppVersion "1.4.9"
 #define MyAppPublisher "BangerTECH"
 #define MyAppURL "https://github.com/BangerTech/Loki-PrintServer"
 #define MyAppExeName "LokiClient.exe"
@@ -49,9 +49,34 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   Tasks: startupitem
 
 [Run]
+; usbip-win 0.3.5 ships a TEST-SIGNED VHCI driver. Windows only loads it when
+; Test-Signing mode is enabled — otherwise "usbip attach" fails with
+; "vhci driver is not loaded". Enable it here (requires a reboot to take effect).
+Filename: "{sys}\bcdedit.exe"; Parameters: "/set testsigning on"; \
+  StatusMsg: "Enabling driver signing mode…"; \
+  Flags: runhidden waituntilterminated
 ; WorkingDir must be the driver folder so usbip.exe finds the .inf/.sys/.cat files.
 Filename: "{app}\usbip-win\usbip.exe"; Parameters: "install"; \
   WorkingDir: "{app}\usbip-win"; \
   StatusMsg: "Installing USB/IP driver…"; \
   Flags: runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// usbip-win's test-signed driver only loads after a reboot once Test-Signing is on.
+function NeedRestart(): Boolean;
+begin
+  Result := True;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    MsgBox(
+      'Loki-Client installed.' + #13#10 + #13#10 +
+      'The USB/IP driver needs Windows Test-Signing mode, which was just enabled.' + #13#10 +
+      'Please RESTART Windows now so the plotter can be attached.' + #13#10 + #13#10 +
+      'Note: if the plotter still is not detected after reboot, Secure Boot must be ' +
+      'turned OFF in your UEFI/BIOS for test-signed drivers to load.',
+      mbInformation, MB_OK);
+end;

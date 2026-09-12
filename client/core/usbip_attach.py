@@ -453,6 +453,7 @@ class DeviceAttacher:
         self._attached: dict[str, AttachResult] = {}  # bus_id -> result
         self._bridges: dict[str, _PtyBridge] = {}     # bus_id -> active bridge
         self._usb_helpers: dict[str, _USBHelperBridge] = {}  # bus_id -> USB helper
+        self._vhci_install_attempted = False  # only trigger the UAC install once
         if OS == "Darwin":
             _USBHelperBridge.kill_stale_helpers()
 
@@ -577,6 +578,26 @@ class DeviceAttacher:
                     "FineCut will then see the plotter as a local USB device."
                 ),
             )
+        # The VHCI kernel driver must be loaded before we can attach. If it isn't,
+        # a bare "usbip attach" just errors with "vhci driver is not loaded".
+        if not self._vhci_driver_loaded(exe):
+            log.warning("VHCI driver not loaded — attempting to load/install it")
+            self._ensure_vhci_driver(exe)
+            if not self._vhci_driver_loaded(exe):
+                return AttachResult(
+                    AttachStatus.ERROR,
+                    message=(
+                        "USB/IP driver (VHCI) is not loaded.\n\n"
+                        "Confirm the Windows Administrator prompt to install it.\n\n"
+                        "If it still fails, the driver needs Windows Test-Signing mode "
+                        "(usbip-win uses a test-signed driver):\n"
+                        "  1. Open PowerShell as Administrator\n"
+                        "  2. bcdedit /set testsigning on\n"
+                        "  3. Restart Windows, then start Loki-Client again.\n\n"
+                        "Note: Secure Boot must be OFF for test-signing to work."
+                    ),
+                )
+
         log.info("usbip-win attach %s -r %s -b %s (cwd=%s)",
                  exe, server_ip, bus_id, os.path.dirname(exe))
         r = _run_usbip_win(exe, ["attach", "-r", server_ip, "-b", bus_id])
@@ -588,7 +609,42 @@ class DeviceAttacher:
             )
         err = (r.stderr or r.stdout or "").strip() or "usbip attach failed"
         log.error("usbip-win attach failed: %s", err)
+        if "not loaded" in err.lower():
+            self._vhci_install_attempted = False  # allow another install attempt
         return AttachResult(AttachStatus.ERROR, message=err)
+
+    def _vhci_driver_loaded(self, exe: str) -> bool:
+        """True if the usbip-win VHCI driver is loaded (checked via `usbip port`)."""
+        try:
+            r = _run_usbip_win(exe, ["port"])
+        except Exception as e:
+            log.debug("usbip port check failed: %s", e)
+            return False
+        combined = ((r.stdout or "") + (r.stderr or "")).lower()
+        return "not loaded" not in combined
+
+    def _ensure_vhci_driver(self, exe: str) -> None:
+        """Try to install/load the VHCI driver, elevating via UAC exactly once."""
+        if self._vhci_install_attempted:
+            return
+        self._vhci_install_attempted = True
+        folder = os.path.dirname(os.path.abspath(exe))
+        try:
+            import ctypes
+
+            # ShellExecuteW with the "runas" verb raises the UAC prompt. nShowCmd=0
+            # (SW_HIDE) keeps usbip's own console hidden; the UAC dialog still shows.
+            rc = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", exe, "install", folder, 0
+            )
+            if rc <= 32:
+                log.error("Elevated 'usbip install' could not start (rc=%s)", rc)
+                return
+        except Exception as e:
+            log.error("Elevated 'usbip install' failed: %s", e)
+            return
+        # Give the PnP subsystem a moment to load the freshly installed driver.
+        time.sleep(3)
 
     def _attach_usbip_macos(self, server_ip: str, bus_id: str) -> AttachResult:
         if shutil.which("limactl"):

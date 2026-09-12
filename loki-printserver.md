@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.4.8  
+**Version:** 1.4.9  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -25,7 +25,7 @@ docker compose up -d
 Unter **https://github.com/BangerTech/Loki-PrintServer/releases** die neueste Version herunterladen:
 
 - **macOS:** `Loki-Client.dmg` → in Applications ziehen → Rechtsklick → Öffnen (einmalig, da nicht notarisiert)
-- **Windows:** `LokiClient-Setup.exe` → Installer ausführen (einmal UAC/Administrator bestätigen — der usbip-win-Treiber wird mitinstalliert)
+- **Windows:** `LokiClient-Setup.exe` → Installer ausführen (einmal UAC/Administrator bestätigen — der usbip-win-Treiber wird mitinstalliert). Der Setup aktiviert den Test-Signing-Modus für den test-signierten VHCI-Treiber und fordert danach einen **Neustart**. Falls der Plotter nach dem Reboot weiter nicht erkannt wird: **Secure Boot** im UEFI/BIOS deaktivieren.
 - **Linux:** `Loki-Client-linux` → ausführbar machen und starten
 
 ---
@@ -432,6 +432,9 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 | `Failed to execute script 'tray_app'` / `ValueError: <function …_open_dashboard>` | pystray erlaubt nur 0–2 Positionsargumente; `def _open_dashboard(_, h=host, p=port)` hat 3 → Crash beim Tray-Start | Callbacks über `_pystray_action()` wrappen (nur `icon, item`) |
 | Dashboard „Shared“, FineCut/Plotter nicht grün, kein Schneiden | Windows hat kein virtuelles USB. Client meldete fälschlich `tcp://server:7580` als Attach — FineCut braucht das echte USB-Gerät | Server `attach-mode=usbip`; Setup installiert usbip-win (UAC). Ohne Treiber Dialog statt Fake-Attach |
 | `usbip: error: attacher.exe not found` / UAC „Zulassen“ nicht klickbar | `usbip.exe` sucht `attacher.exe` im Arbeitsverzeichnis (Loki-App), nicht neben sich; Fehlerdialog lag über der UAC | Attach mit `cwd={app}\usbip-win`; kein blockierender Auto-Attach-Dialog |
+| PowerShell-/Konsolenfenster poppt im Sekundentakt auf | `subprocess.run`/`Popen` ohne `CREATE_NO_WINDOW` in einer `--noconsole`-App; Auto-Attach ohne Retry-Bremse | `CREATE_NO_WINDOW` überall; 60s-Backoff pro `bus_id` in `_auto_attach_shared` |
+| Fehlerdialog „Plotter not attached“ nicht wegklickbar / stapelt sich | `_notify` erzeugte pro Aufruf ein neues `tk.Tk()` aus einem Hintergrund-Thread | Native Win32 `MessageBoxW` (thread-sicher, immer klickbar) + Dedup |
+| `usbip: error: vhci driver is not loaded` | usbip-win 0.3.5 nutzt einen test-signierten Treiber; ohne Test-Signing-Modus lädt Windows ihn nicht | Setup aktiviert `bcdedit /set testsigning on` + Reboot; Client versucht 1× elevated `usbip install`. Bei Secure Boot: im UEFI abschalten |
 
 ---
 
@@ -492,3 +495,4 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-09 | 1.4.6 | **Fix: `attacher.exe not found`:** usbip.exe wird mit `cwd` + PATH im `usbip-win`-Ordner gestartet. Auto-Attach-Dialog nicht mehr topmost (hat UAC „Zulassen“ überdeckt). **Dashboard-Plotter flackert nicht mehr:** Libusb-Reset max. alle 15s; gesharete Geräte bleiben sichtbar wenn usbip/pyusb sie kurz versteckt; VID:PID-Match nach USB-Re-Enumeration. macOS-Client unverändert. |
 || 2026-09 | 1.4.7 | **Dashboard:** Version kommt aus `VERSION` (`/health`, `/api/status`, Header-Badge). Shared-Zahl = eindeutige VID:PID, tote bus_ids werden aufgeräumt. Memory `used / total`, Uptime neben Status, Karten umbrechen. Live-Protokoll (`GET /api/logs`) mit Auto-Refresh und Pause. Sprache DE/EN (`localStorage`, Browser-Default). macOS-Client unverändert. |
 || 2026-09 | 1.4.8 | **Fix: Windows Konsolenfenster-Flash:** `CREATE_NO_WINDOW` zu allen `subprocess.run`/`Popen`-Calls in `usbip_attach.py` (inkl. `_run_usbip_win`, `com2tcp`). **Fix: usbip-Retry-Loop:** Auto-Attach-Fehler werden mit 60s-Backoff gedrosselt — kein ständiges Aufpoppen mehr wenn `usbip.exe attach` fehlschlägt. Backoff wird zurückgesetzt wenn das Gerät nicht mehr sichtbar ist oder manuell umgeschaltet wird. macOS-Client unverändert. |
+|| 2026-09 | 1.4.9 | **Fix: `vhci driver is not loaded`:** Setup aktiviert Test-Signing (`bcdedit /set testsigning on`) und fordert Reboot — usbip-win 0.3.5 ist test-signiert. Client prüft vor `attach` per `usbip port` ob der VHCI-Treiber geladen ist, versucht sonst 1× elevated `usbip install` (UAC) und zeigt eine klare Anleitung (Test-Signing/Secure-Boot). **Fix: Fehlerdialog:** native Win32 `MessageBoxW` statt tkinter aus Hintergrund-Thread — immer wegklickbar, keine gestapelten Dialoge (Dedup). macOS-Client unverändert. |

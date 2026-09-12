@@ -61,8 +61,43 @@ except ImportError:
     HAS_PYSTRAY = False
 
 
+_last_notify: dict[str, float] = {}
+_NOTIFY_DEDUP_SECS = 30.0
+
+
 def _notify(title: str, message: str):
-    """Show a desktop message (Windows/Linux). Safe to call from a tray thread."""
+    """Show a desktop message (Windows/Linux). Safe to call from any thread.
+
+    On Windows we use the native MessageBox (via ctypes) instead of tkinter:
+      - tkinter creates a new Tk() root per call; from a pystray callback thread
+        that repeatedly produced dialogs whose OK button did not respond and that
+        stacked on top of each other.
+      - The native MessageBox pumps its own modal loop, is always dismissable,
+        and runs in a daemon thread so it never blocks the tray/poll threads.
+    Identical messages are suppressed for a short window so they can't pile up.
+    """
+    key = f"{title}\n{message}"
+    now = time.monotonic()
+    if now - _last_notify.get(key, 0.0) < _NOTIFY_DEDUP_SECS:
+        log.info("(suppressed duplicate notification) %s: %s", title, message)
+        return
+    _last_notify[key] = now
+
+    if OS == "Windows":
+        try:
+            import ctypes
+
+            def _show():
+                # MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST
+                ctypes.windll.user32.MessageBoxW(
+                    0, message, title, 0x0 | 0x40 | 0x10000 | 0x40000
+                )
+
+            threading.Thread(target=_show, daemon=True, name="loki-notify").start()
+            return
+        except Exception:
+            pass
+
     try:
         import tkinter as tk
         from tkinter import messagebox
