@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.4.2  
+**Version:** 1.4.4  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -412,6 +412,15 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 
 ---
 
+## Windows Build — bekannte Stolperfallen
+
+| Problem | Ursache | Fix |
+|---------|---------|-----|
+| `IPersistFile::Save failed; Code 0x80070005. Zugriff verweigert` beim Anlegen von `C:\Users\Public\Desktop\Loki-Client.lnk` | Installer läuft per-user (`PrivilegesRequired=lowest`), die Desktop-Verknüpfung zielte auf `{commondesktop}` (öffentlicher Desktop, braucht Admin) | `{autodesktop}` nutzen — ohne Elevation landet die `.lnk` auf dem Benutzer-Desktop |
+| `Failed to execute script 'tray_app'` / `ValueError: <function …_open_dashboard>` | pystray erlaubt nur 0–2 Positionsargumente; `def _open_dashboard(_, h=host, p=port)` hat 3 → Crash beim Tray-Start | Callbacks über `_pystray_action()` wrappen (nur `icon, item`) |
+
+---
+
 ## macOS Build — bekannte Stolperfallen
 
 | Problem | Ursache | Fix |
@@ -462,3 +471,4 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-04 | 1.4.1 | **Kritische Fixes für Raw USB Bridge**: (1) `_resolve_usbip_busid` gab immer den ersten busid zurück → usbip band den Mimaki für ALLE Geräte um und stahl ihn von pyusb. Fix: korrekte sysfs-Auflösung per `busnum`/`devnum`. (2) `start.sh` registrierte Mimaki bei `usbserial_generic` → Fix: Mimaki aus usbserial-Registration entfernt, stattdessen Kernel-Treiber aktiv entbunden. (3) `share_device` erstellt bei Re-Share keine zweite Bridge-Instanz mehr (erkennt aktive Bridge via `serial_dev` Prefix). (4) Bridge Self-Test: sendet `OH;` nach Device-Open und prüft Plotter-Antwort. **Ergebnis: FineCut schneidet erfolgreich über Loki-PrintServer.** |
 || 2026-04 | 1.4.2 | **Fix: CDC-ACM Device Name**: macOS `AppleUSBACMData` Treiber nutzt die USB-Seriennummer für den `/dev/cu.usbmodem<name>` Pfad nur wenn sie ≤ 8 ASCII-Zeichen hat (Quellcode-Analyse des Apple CDC-Treibers). Längere Namen verursachen Fallback auf Location-ID-Naming (z.B. `usbmodem89101`). Fix: `CDCACMDevice.swift` und `usbip_attach.py` kürzen den Device-Name auf max 8 Zeichen. Beispiel: `Vevor135Plotter` → `Vevor135` → `/dev/cu.usbmodemVevor1351`. |
 || 2026-04 | — | **CI / Doku:** Ruff-Fixes (`F541` überflüssige `f`-Strings in `usbip_attach.py`; `F401`/`F811`/`F541` in `usb_bridge.py`). `loki-printserver.md`: Abschnitt CI/Lint + Billing-Hinweis. README: Lizenzblock ohne Third-Party-Disclaimer-Zeile. |
+|| 2026-09 | 1.4.4 | **Fix: Windows Installer + Tray:** Desktop-Shortcut `{commondesktop}` → `{autodesktop}` (kein `0x80070005` mehr auf `C:\Users\Public\Desktop`). pystray-Callbacks über `_pystray_action()` gewrappt — Tray startet wieder (`ValueError` durch >2 Positionsargumente). |

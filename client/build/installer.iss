@@ -1,7 +1,7 @@
 ; Loki-PrintServer Windows Installer (Inno Setup)
 ; NOTE: All paths are relative to the location of this .iss file (client/build/)
 #define MyAppName "Loki-Client"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.4.4"
 #define MyAppPublisher "BangerTECH"
 #define MyAppURL "https://github.com/BangerTech/Loki-PrintServer"
 #define MyAppExeName "LokiClient.exe"
@@ -20,7 +20,9 @@ SetupIconFile=..\assets\icon.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+; Per-user install (no UAC). {auto*} constants then resolve to the current user.
 PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -36,7 +38,7 @@ Source: "..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \

@@ -543,6 +543,19 @@ if HAS_RUMPS:
 #  pystray fallback (Windows + Linux)
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _pystray_action(fn):
+    """Wrap a 0-arg callback for pystray.MenuItem.
+
+    pystray._assert_action() counts positional args via co_argcount and
+    raises ValueError if there are more than 2 (icon, item). Capturing
+    loop variables as extra positional defaults (def cb(_, h=host, p=port))
+    therefore crashes the Windows/Linux tray on startup.
+    """
+    def _cb(icon=None, item=None):
+        fn()
+    return _cb
+
+
 class LokiPystrayApp:
     def __init__(self, config: LokiConfig):
         log.info("LokiPystrayApp init with %d server(s)", len(config.servers))
@@ -643,13 +656,16 @@ class LokiPystrayApp:
                         mark = " ✓" if is_att else ""
                         sub_items.append(pystray.MenuItem(
                             f"{icon} {prod}{mark}",
-                            lambda _, d=dev, c=conn: self._toggle_device(d, c)
+                            _pystray_action(lambda d=dev, c=conn: self._toggle_device(d, c)),
                         ))
 
                 sub_items.append(pystray.Menu.SEPARATOR)
-                def _open_dashboard(_, h=host, p=conn.entry.port):
-                    webbrowser.open(f"http://{h}:{p}")
-                sub_items.append(pystray.MenuItem("Open Dashboard", _open_dashboard))
+                sub_items.append(pystray.MenuItem(
+                    "Open Dashboard",
+                    _pystray_action(
+                        lambda h=host, p=conn.entry.port: webbrowser.open(f"http://{h}:{p}")
+                    ),
+                ))
                 items.append(pystray.MenuItem(label, pystray.Menu(*sub_items)))
 
         items.append(pystray.Menu.SEPARATOR)
