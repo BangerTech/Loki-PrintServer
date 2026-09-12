@@ -26,7 +26,7 @@
       background: linear-gradient(135deg, #0a1628 0%, #0d2040 50%, #0a1a35 100%);
       border-bottom: 1px solid var(--border);
       padding: 16px 32px;
-      display: flex; align-items: center; gap: 16px;
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
     }
     .logo {
       width: 44px; height: 44px;
@@ -36,12 +36,30 @@
       font-size: 22px; font-weight: bold; color: white;
     }
     header h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: 0.5px; }
-    header span { color: var(--muted); font-size: 0.85rem; margin-left: 8px; }
+    .version-badge {
+      display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px;
+      font-size: 0.72rem; font-weight: 600; vertical-align: middle;
+      background: rgba(30,144,255,0.15); color: var(--accent2);
+      border: 1px solid rgba(30,144,255,0.35);
+    }
+    .header-right {
+      margin-left: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .status-wrap { display: flex; align-items: center; gap: 8px; }
     .status-dot {
       width: 8px; height: 8px; border-radius: 50%;
-      background: var(--success); margin-left: auto;
+      background: var(--success);
       box-shadow: 0 0 8px var(--success); animation: pulse 2s infinite;
     }
+    .uptime { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+    .lang-toggle { display: flex; gap: 4px; }
+    .lang-btn {
+      padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); cursor: pointer;
+      font-size: 0.72rem; font-weight: 700;
+    }
+    .lang-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .lang-btn.active { border-color: var(--accent2); color: var(--accent2); background: rgba(30,144,255,0.12); }
     @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.5 } }
     main { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 32px; }
@@ -53,12 +71,12 @@
     .stat-card .value { font-size: 2rem; font-weight: 700; color: var(--accent2); margin-top: 6px; }
     .stat-card .sub { color: var(--muted); font-size: 0.8rem; margin-top: 2px; }
     section { margin-bottom: 32px; }
-    h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; color: var(--accent2); display: flex; align-items: center; gap: 8px; }
+    h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; color: var(--accent2); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .device-list { display: flex; flex-direction: column; gap: 10px; }
     .device-card {
       background: var(--card); border: 1px solid var(--border);
       border-radius: 10px; padding: 16px 20px;
-      display: flex; align-items: center; gap: 16px;
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
       transition: border-color 0.2s;
     }
     .device-card:hover { border-color: var(--accent); }
@@ -68,7 +86,7 @@
       display: flex; align-items: center; justify-content: center;
       font-size: 18px; flex-shrink: 0;
     }
-    .device-info { flex: 1; }
+    .device-info { flex: 1; min-width: 180px; }
     .device-name { font-weight: 600; font-size: 0.95rem; }
     .device-meta { color: var(--muted); font-size: 0.8rem; margin-top: 3px; font-family: monospace; }
     .badge {
@@ -120,6 +138,18 @@
       font-family: inherit; outline: none; width: 200px;
     }
     .custom-badge { font-size: 0.7rem; color: var(--accent); opacity: 0.7; margin-left: 4px; }
+    .log-view {
+      background: #070c18; border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 14px; max-height: 280px; overflow: auto;
+      font-family: ui-monospace, Consolas, monospace; font-size: 0.75rem;
+      line-height: 1.45; color: #9ec4d4; white-space: pre-wrap; word-break: break-word;
+    }
+    @media (max-width: 720px) {
+      header { padding: 12px 16px; }
+      main { padding: 20px 16px; }
+      .device-actions { width: 100%; justify-content: flex-start; }
+      .stat-card .value { font-size: 1.6rem; }
+    }
   </style>
 </head>
 <body>
@@ -127,49 +157,66 @@
     <img src="/assets/icon_64.png" alt="Loki" style="width:44px;height:44px;border-radius:10px;" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
     <div style="display:none;width:44px;height:44px;background:var(--accent);border-radius:10px;align-items:center;justify-content:center;font-weight:bold;color:#0a0f1e;font-size:20px">L</div>
     <div>
-      <h1>Loki-PrintServer <span id="version">v1.0.0</span></h1>
+      <h1>Loki-PrintServer <span class="version-badge" id="version">—</span></h1>
     </div>
-    <div class="status-dot" id="statusDot" title="Server running"></div>
+    <div class="header-right">
+      <div class="lang-toggle" role="group" aria-label="Language">
+        <button type="button" class="lang-btn" id="langDe" onclick="setLang('de')">DE</button>
+        <button type="button" class="lang-btn" id="langEn" onclick="setLang('en')">EN</button>
+      </div>
+      <div class="status-wrap">
+        <div class="status-dot" id="statusDot" title=""></div>
+        <span class="uptime" id="uptime"></span>
+      </div>
+    </div>
   </header>
 
   <main>
     <div class="grid">
       <div class="stat-card">
-        <div class="label">USB Devices</div>
+        <div class="label" data-i18n="usbDevices">USB Devices</div>
         <div class="value" id="statDevices">-</div>
-        <div class="sub">connected</div>
+        <div class="sub" data-i18n="connected">connected</div>
       </div>
       <div class="stat-card">
-        <div class="label">Shared</div>
+        <div class="label" data-i18n="shared">Shared</div>
         <div class="value" id="statShared">-</div>
-        <div class="sub">actively shared</div>
+        <div class="sub" data-i18n="activelyShared">actively shared</div>
       </div>
       <div class="stat-card">
-        <div class="label">CPU</div>
+        <div class="label" data-i18n="cpu">CPU</div>
         <div class="value" id="statCpu">-</div>
-        <div class="sub">percent usage</div>
+        <div class="sub" data-i18n="cpuSub">percent usage</div>
       </div>
       <div class="stat-card">
-        <div class="label">Memory</div>
+        <div class="label" data-i18n="memory">Memory</div>
         <div class="value" id="statMem">-</div>
-        <div class="sub">MB used</div>
+        <div class="sub" data-i18n="memorySub">MB used / total</div>
       </div>
     </div>
 
     <section>
       <h2>
-        🔌 USB Devices
-        <button class="refresh-btn" onclick="loadDevices()">↻ Refresh</button>
+        🔌 <span data-i18n="usbDevices">USB Devices</span>
+        <button class="refresh-btn" onclick="loadDevices()" data-i18n="refresh">↻ Refresh</button>
       </h2>
       <div class="device-list" id="deviceList">
-        <div class="empty">Loading devices...</div>
+        <div class="empty" data-i18n="loadingDevices">Loading devices...</div>
       </div>
       <details id="infraSection" style="display:none;margin-top:8px;">
         <summary>
-          <div class="infra-header">▸ USB Infrastructure (Hubs &amp; Controllers)</div>
+          <div class="infra-header" data-i18n="infraHeader">▸ USB Infrastructure (Hubs &amp; Controllers)</div>
         </summary>
         <div class="device-list" id="infraList"></div>
       </details>
+    </section>
+
+    <section>
+      <h2>
+        <span data-i18n="logTitle">Live log</span>
+        <button class="refresh-btn" id="logPauseBtn" onclick="toggleLogPause()"></button>
+      </h2>
+      <pre class="log-view" id="logView"></pre>
     </section>
   </main>
 
@@ -181,14 +228,150 @@
 
   <script>
     const API = '';
+    const I18N = {
+      en: {
+        usbDevices: 'USB Devices',
+        connected: 'connected',
+        shared: 'Shared',
+        activelyShared: 'actively shared',
+        cpu: 'CPU',
+        cpuSub: 'percent usage',
+        memory: 'Memory',
+        memorySub: 'MB used / total',
+        refresh: '↻ Refresh',
+        loadingDevices: 'Loading devices...',
+        noDevices: 'No USB devices detected',
+        loadDevicesFailed: 'Failed to load devices',
+        infraHeader: '▸ USB Infrastructure (Hubs & Controllers)',
+        badgeShared: '● Shared',
+        badgeIdle: 'Idle',
+        badgeInfra: 'Infrastructure',
+        autoShare: 'Auto-Share',
+        autoShareTitle: 'Re-share automatically after server restart',
+        stopSharing: 'Stop Sharing',
+        share: 'Share',
+        renameTitle: 'Rename device',
+        unknownClass: 'Unknown',
+        bus: 'Bus',
+        toastShared: 'Device {id} shared',
+        toastShareFailed: 'Failed to share device',
+        toastAutoOn: 'Auto-Share enabled — device will be shared on restart',
+        toastAutoOff: 'Auto-Share disabled',
+        toastAutoFailed: 'Failed to update Auto-Share',
+        toastUnshared: 'Device {id} stopped',
+        toastUnshareFailed: 'Failed to unshare device',
+        toastRenamed: 'Renamed to "{name}"',
+        toastNameReset: 'Name reset to default',
+        toastRenameFailed: 'Rename failed',
+        renamePlaceholder: 'Custom name (empty = reset)',
+        logTitle: 'Live log',
+        logPause: 'Pause',
+        logResume: 'Resume',
+        logEmpty: 'No log lines yet',
+        logFailed: 'Failed to load logs',
+        statusRunning: 'Server running',
+        statusOffline: 'Server offline',
+        uptime: 'Uptime {value}',
+      },
+      de: {
+        usbDevices: 'USB-Geräte',
+        connected: 'angeschlossen',
+        shared: 'Freigegeben',
+        activelyShared: 'aktiv geteilt',
+        cpu: 'CPU',
+        cpuSub: 'Auslastung',
+        memory: 'Speicher',
+        memorySub: 'MB belegt / gesamt',
+        refresh: '↻ Aktualisieren',
+        loadingDevices: 'Geräte werden geladen...',
+        noDevices: 'Keine USB-Geräte erkannt',
+        loadDevicesFailed: 'Geräte konnten nicht geladen werden',
+        infraHeader: '▸ USB-Infrastruktur (Hubs & Controller)',
+        badgeShared: '● Freigegeben',
+        badgeIdle: 'Bereit',
+        badgeInfra: 'Infrastruktur',
+        autoShare: 'Auto-Share',
+        autoShareTitle: 'Nach Server-Neustart automatisch wieder freigeben',
+        stopSharing: 'Freigabe beenden',
+        share: 'Freigeben',
+        renameTitle: 'Gerät umbenennen',
+        unknownClass: 'Unbekannt',
+        bus: 'Bus',
+        toastShared: 'Gerät {id} freigegeben',
+        toastShareFailed: 'Freigabe fehlgeschlagen',
+        toastAutoOn: 'Auto-Share aktiv — Gerät wird nach Neustart wieder geteilt',
+        toastAutoOff: 'Auto-Share deaktiviert',
+        toastAutoFailed: 'Auto-Share konnte nicht geändert werden',
+        toastUnshared: 'Freigabe von {id} beendet',
+        toastUnshareFailed: 'Freigabe konnte nicht beendet werden',
+        toastRenamed: 'Umbenannt in „{name}“',
+        toastNameReset: 'Name auf Standard zurückgesetzt',
+        toastRenameFailed: 'Umbenennen fehlgeschlagen',
+        renamePlaceholder: 'Eigener Name (leer = zurücksetzen)',
+        logTitle: 'Live-Protokoll',
+        logPause: 'Pause',
+        logResume: 'Fortsetzen',
+        logEmpty: 'Noch keine Logzeilen',
+        logFailed: 'Protokoll konnte nicht geladen werden',
+        statusRunning: 'Server läuft',
+        statusOffline: 'Server offline',
+        uptime: 'Laufzeit {value}',
+      },
+    };
+
+    function detectLang() {
+      const saved = localStorage.getItem('loki-lang');
+      if (saved === 'de' || saved === 'en') return saved;
+      const nav = (navigator.language || 'en').slice(0, 2).toLowerCase();
+      return nav === 'de' ? 'de' : 'en';
+    }
+
+    let lang = detectLang();
+    let logPaused = false;
+    let logTimer = null;
+
+    function t(key, vars) {
+      const dict = I18N[lang] || I18N.en;
+      let s = dict[key] || I18N.en[key] || key;
+      if (vars) {
+        Object.entries(vars).forEach(([k, v]) => {
+          s = s.replaceAll('{' + k + '}', v);
+        });
+      }
+      return s;
+    }
+
+    function applyI18n() {
+      document.documentElement.lang = lang;
+      document.querySelectorAll('[data-i18n]').forEach((el) => {
+        el.textContent = t(el.getAttribute('data-i18n'));
+      });
+      document.getElementById('langDe').classList.toggle('active', lang === 'de');
+      document.getElementById('langEn').classList.toggle('active', lang === 'en');
+      updateLogPauseLabel();
+    }
+
+    function setLang(next) {
+      lang = next === 'de' ? 'de' : 'en';
+      localStorage.setItem('loki-lang', lang);
+      applyI18n();
+      loadStatus();
+      loadDevices();
+      if (!logPaused) loadLogs();
+    }
+
+    function updateLogPauseLabel() {
+      const btn = document.getElementById('logPauseBtn');
+      btn.textContent = logPaused ? t('logResume') : t('logPause');
+    }
 
     function showToast(msg, ok = true) {
-      const t = document.getElementById('toast');
-      t.textContent = msg;
-      t.style.borderColor = ok ? 'var(--success)' : 'var(--danger)';
-      t.style.color = ok ? 'var(--success)' : 'var(--danger)';
-      t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 3000);
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.style.borderColor = ok ? 'var(--success)' : 'var(--danger)';
+      el.style.color = ok ? 'var(--success)' : 'var(--danger)';
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 3000);
     }
 
     const DEVICE_ICONS = {
@@ -201,15 +384,31 @@
       'Audio': '🔊', 'Video': '🎥', 'Wireless Controller': '📶',
     };
 
+    function formatUptime(sec) {
+      const d = Math.floor(sec / 86400);
+      const h = Math.floor((sec % 86400) / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      if (d) return `${d}d ${h}h`;
+      if (h) return `${h}h ${m}m`;
+      return `${m}m`;
+    }
+
     async function loadStatus() {
+      const dot = document.getElementById('statusDot');
       try {
         const r = await fetch(`${API}/api/status`);
         const s = await r.json();
         document.getElementById('statCpu').textContent = s.cpu_percent.toFixed(0) + '%';
-        document.getElementById('statMem').textContent = s.memory_used_mb;
+        document.getElementById('statMem').textContent = `${s.memory_used_mb} / ${s.memory_total_mb}`;
         document.getElementById('statShared').textContent = s.shared_device_count;
-      } catch(e) {
-        document.getElementById('statusDot').style.background = 'var(--danger)';
+        const ver = s.version ? `v${String(s.version).replace(/^v/i, '')}` : '—';
+        document.getElementById('version').textContent = ver;
+        document.getElementById('uptime').textContent = t('uptime', { value: formatUptime(s.uptime_seconds || 0) });
+        dot.style.background = 'var(--success)';
+        dot.title = t('statusRunning');
+      } catch (e) {
+        dot.style.background = 'var(--danger)';
+        dot.title = t('statusOffline');
       }
     }
 
@@ -221,21 +420,21 @@
       const fi = d.forward_info || {};
       const autoShare = fi.auto_share || false;
       const badge = d.is_shared
-        ? `<span class="badge badge-shared">● Shared</span>`
-        : `<span class="badge badge-idle">${isInfra ? 'Infrastructure' : 'Idle'}</span>`;
+        ? `<span class="badge badge-shared">${t('badgeShared')}</span>`
+        : `<span class="badge badge-idle">${isInfra ? t('badgeInfra') : t('badgeIdle')}</span>`;
       const editBtn = isInfra ? '' :
-        `<span class="device-name-edit" onclick="startRename('${d.bus_id}', this)" title="Rename device">✏️</span>`;
+        `<span class="device-name-edit" onclick="startRename('${d.bus_id}', this)" title="${t('renameTitle')}">✏️</span>`;
       const customBadge = hasCustom ? `<span class="custom-badge">(${d.product || ''})</span>` : '';
       const actions = isInfra ? '' : (d.is_shared
         ? `<div class="device-actions">
-            <label class="auto-share-toggle ${autoShare ? 'active' : ''}" title="Re-share automatically after server restart">
+            <label class="auto-share-toggle ${autoShare ? 'active' : ''}" title="${t('autoShareTitle')}">
               <input type="checkbox" ${autoShare ? 'checked' : ''} onchange="toggleAutoShare('${d.bus_id}', this.checked)">
-              Auto-Share
+              ${t('autoShare')}
             </label>
-            <button class="btn btn-unshare" onclick="unshareDevice('${d.bus_id}')">Stop Sharing</button>
+            <button class="btn btn-unshare" onclick="unshareDevice('${d.bus_id}')">${t('stopSharing')}</button>
            </div>`
         : `<div class="device-actions">
-            <button class="btn btn-share" onclick="shareDevice('${d.bus_id}')">Share</button>
+            <button class="btn btn-share" onclick="shareDevice('${d.bus_id}')">${t('share')}</button>
            </div>`);
       return `
         <div class="device-card${isInfra ? ' infra' : ''}">
@@ -245,7 +444,7 @@
               <span class="device-name">${displayName}</span>${customBadge}
               ${editBtn}
             </div>
-            <div class="device-meta">${mfr}${d.vendor_id}:${d.product_id} · Bus ${d.bus_id} · ${d.device_class || 'Unknown'}</div>
+            <div class="device-meta">${mfr}${d.vendor_id}:${d.product_id} · ${t('bus')} ${d.bus_id} · ${d.device_class || t('unknownClass')}</div>
           </div>
           ${badge}
           ${actions}
@@ -266,7 +465,7 @@
         document.getElementById('statDevices').textContent = peripherals.length;
 
         if (peripherals.length === 0) {
-          list.innerHTML = '<div class="empty">No USB devices detected</div>';
+          list.innerHTML = `<div class="empty">${t('noDevices')}</div>`;
         } else {
           list.innerHTML = peripherals.map(d => renderDevice(d, false)).join('');
         }
@@ -277,9 +476,29 @@
         } else {
           infraSection.style.display = 'none';
         }
-      } catch(e) {
-        list.innerHTML = '<div class="empty">Failed to load devices</div>';
+      } catch (e) {
+        list.innerHTML = `<div class="empty">${t('loadDevicesFailed')}</div>`;
       }
+    }
+
+    async function loadLogs() {
+      const view = document.getElementById('logView');
+      try {
+        const r = await fetch(`${API}/api/logs?lines=80`);
+        const data = await r.json();
+        const lines = data.lines || [];
+        const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 24;
+        view.textContent = lines.length ? lines.join('\n') : t('logEmpty');
+        if (atBottom) view.scrollTop = view.scrollHeight;
+      } catch (e) {
+        view.textContent = t('logFailed');
+      }
+    }
+
+    function toggleLogPause() {
+      logPaused = !logPaused;
+      updateLogPauseLabel();
+      if (!logPaused) loadLogs();
     }
 
     async function shareDevice(busId) {
@@ -290,20 +509,20 @@
           body: JSON.stringify({ bus_id: busId }),
         });
         const j = await r.json();
-        showToast(j.message || `Device ${busId} shared`);
+        showToast(j.message || t('toastShared', { id: busId }));
         setTimeout(loadDevices, 500);
-      } catch(e) {
-        showToast('Failed to share device', false);
+      } catch (e) {
+        showToast(t('toastShareFailed'), false);
       }
     }
 
     async function toggleAutoShare(busId, enabled) {
       try {
         await fetch(`${API}/api/devices/${busId}/auto-share?enabled=${enabled}`, { method: 'POST' });
-        showToast(enabled ? '⏰ Auto-Share enabled — device will be shared on restart' : 'Auto-Share disabled');
+        showToast(enabled ? t('toastAutoOn') : t('toastAutoOff'));
         setTimeout(loadDevices, 300);
-      } catch(e) {
-        showToast('Failed to update Auto-Share', false);
+      } catch (e) {
+        showToast(t('toastAutoFailed'), false);
       }
     }
 
@@ -315,10 +534,10 @@
           body: JSON.stringify({ bus_id: busId }),
         });
         const j = await r.json();
-        showToast(j.message || `Device ${busId} stopped`);
+        showToast(j.message || t('toastUnshared', { id: busId }));
         setTimeout(loadDevices, 500);
-      } catch(e) {
-        showToast('Failed to unshare device', false);
+      } catch (e) {
+        showToast(t('toastUnshareFailed'), false);
       }
     }
 
@@ -329,7 +548,7 @@
       input.type = 'text';
       input.className = 'name-input';
       input.value = currentName;
-      input.placeholder = 'Custom name (empty = reset)';
+      input.placeholder = t('renamePlaceholder');
 
       const row = editBtn.closest('.device-name-row');
       row.innerHTML = '';
@@ -345,9 +564,9 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: newName }),
           });
-          showToast(newName ? `Renamed to "${newName}"` : 'Name reset to default');
-        } catch(e) {
-          showToast('Rename failed', false);
+          showToast(newName ? t('toastRenamed', { name: newName }) : t('toastNameReset'));
+        } catch (e) {
+          showToast(t('toastRenameFailed'), false);
         }
         loadDevices();
       }
@@ -359,7 +578,6 @@
       input.addEventListener('blur', save);
     }
 
-    // WebSocket for real-time updates
     function connectWS() {
       const ws = new WebSocket(`ws://${location.host}/ws`);
       ws.onmessage = (e) => {
@@ -373,10 +591,13 @@
       setInterval(() => ws.readyState === 1 && ws.send('ping'), 30000);
     }
 
+    applyI18n();
     loadStatus();
     loadDevices();
+    loadLogs();
     connectWS();
     setInterval(() => { loadStatus(); loadDevices(); }, 5000);
+    logTimer = setInterval(() => { if (!logPaused) loadLogs(); }, 4000);
   </script>
 </body>
 </html>

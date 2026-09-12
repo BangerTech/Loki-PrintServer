@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.4.6  
+**Version:** 1.4.8  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -105,8 +105,9 @@ Client (Mac/Win/Linux)
 
 | Method | Endpoint | Beschreibung |
 |--------|----------|-------------|
-| GET | `/health` | Health-Check |
-| GET | `/api/status` | CPU, RAM, Uptime, shared count |
+| GET | `/health` | Health-Check (`version` aus `VERSION`) |
+| GET | `/api/status` | CPU, RAM (`used`/`total`), Uptime, unique Shared-Zahl, `version` |
+| GET | `/api/logs?lines=80` | Letzte Server-Logzeilen (1–500) |
 | GET | `/api/devices` | Alle USB-Geräte mit `forward_info` und `is_infrastructure` |
 | GET | `/api/devices/shared` | Nur freigegebene Geräte |
 | POST | `/api/devices/share` | Gerät freigeben (USB/IP + Serial + CUPS) |
@@ -196,6 +197,7 @@ Dann werden beim Start **alle erkannten Peripheriegeräte** sofort geshared — 
 ```
 /etc/loki-printserver/shared_devices.json
 /etc/loki-printserver/custom_names.json
+/etc/loki-printserver/loki-server.log
 ```
 
 `shared_devices.json` (Beispiel):
@@ -232,7 +234,9 @@ Das Dashboard und die API unterscheiden zwei Kategorien:
 | Peripheriegerät | `false` | Plotter, Drucker, Storage, HID etc. | ✅ Ja |
 | Infrastruktur | `true` | USB-Hubs, Root-Controller, Linux Foundation | ❌ Nein |
 
-Infrastruktur-Geräte werden im Dashboard in einem **ausgeklappten Bereich** am unteren Ende angezeigt (gedimmt, kein Share-Button). Der Gerätezähler oben zeigt nur echte Peripheriegeräte.
+Infrastruktur-Geräte werden im Dashboard in einem **ausgeklappten Bereich** am unteren Ende angezeigt (gedimmt, kein Share-Button). Der Gerätezähler oben zeigt nur echte Peripheriegeräte. Die Kachel **Shared** zählt eindeutige Peripherie nach VID:PID (keine toten bus_ids).
+
+Im Header: Versions-Badge aus `/api/status`, Uptime neben dem Status-Punkt, Umschalter **DE/EN** (Browser-Sprache, sonst EN; Wahl in `localStorage`). Unter der Geräteliste: **Live-Protokoll** (`GET /api/logs`, Auto-Refresh, Pause).
 
 **Als Infrastruktur erkannt:**
 - `bDeviceClass == 0x09` (USB Hub)
@@ -486,3 +490,5 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-09 | — | **Fix: Windows Mimaki-Plot:** Client attached CG-SR nur als `tcp://…:7580` (Raw-USB-Bridge) — FineCut sieht kein USB-Gerät. Neu: `POST /api/devices/{bus_id}/attach-mode` schaltet Pi auf USB/IP; Windows hängt per usbip-win an. Ohne usbip-win Dialog statt Fake-Attach. macOS-Bridge unverändert. |
 || 2026-09 | 1.4.5 | **Windows Setup bündelt usbip-win 0.3.5** (signierter VHCI-Treiber). `usbip.exe install` läuft im Setup (Admin/UAC). Anwender muss den Treiber nicht mehr separat holen. macOS unverändert. |
 || 2026-09 | 1.4.6 | **Fix: `attacher.exe not found`:** usbip.exe wird mit `cwd` + PATH im `usbip-win`-Ordner gestartet. Auto-Attach-Dialog nicht mehr topmost (hat UAC „Zulassen“ überdeckt). **Dashboard-Plotter flackert nicht mehr:** Libusb-Reset max. alle 15s; gesharete Geräte bleiben sichtbar wenn usbip/pyusb sie kurz versteckt; VID:PID-Match nach USB-Re-Enumeration. macOS-Client unverändert. |
+|| 2026-09 | 1.4.7 | **Dashboard:** Version kommt aus `VERSION` (`/health`, `/api/status`, Header-Badge). Shared-Zahl = eindeutige VID:PID, tote bus_ids werden aufgeräumt. Memory `used / total`, Uptime neben Status, Karten umbrechen. Live-Protokoll (`GET /api/logs`) mit Auto-Refresh und Pause. Sprache DE/EN (`localStorage`, Browser-Default). macOS-Client unverändert. |
+|| 2026-09 | 1.4.8 | **Fix: Windows Konsolenfenster-Flash:** `CREATE_NO_WINDOW` zu allen `subprocess.run`/`Popen`-Calls in `usbip_attach.py` (inkl. `_run_usbip_win`, `com2tcp`). **Fix: usbip-Retry-Loop:** Auto-Attach-Fehler werden mit 60s-Backoff gedrosselt — kein ständiges Aufpoppen mehr wenn `usbip.exe attach` fehlschlägt. Backoff wird zurückgesetzt wenn das Gerät nicht mehr sichtbar ist oder manuell umgeschaltet wird. macOS-Client unverändert. |

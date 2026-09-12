@@ -48,6 +48,12 @@ class AttachResult:
 
 
 def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+    # On Windows, always suppress the console window that would otherwise flash
+    # briefly for every subprocess spawned from a frozen (--noconsole) app.
+    # CREATE_NO_WINDOW is defined for all platforms in Python 3.7+ but only
+    # has effect on Windows, so using it unconditionally is safe.
+    if OS == "Windows" and "creationflags" not in kwargs:
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
 
 
@@ -62,6 +68,8 @@ def _run_usbip_win(exe: str, args: list[str]) -> subprocess.CompletedProcess:
         env=env,
         capture_output=True,
         text=True,
+        # Suppress the console window — critical for a system-tray app
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
 
 
@@ -748,7 +756,8 @@ class DeviceAttacher:
         if com2tcp:
             proc = subprocess.Popen(
                 [com2tcp, "\\\\.\\CNCB0", server_ip, str(port)],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             time.sleep(1)
             if proc.poll() is None:

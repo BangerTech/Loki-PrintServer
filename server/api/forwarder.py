@@ -119,6 +119,8 @@ class ForwardingManager:
         state.product_name = product_name
         if auto_share:
             state.auto_share = True
+        if vendor_id and product_id:
+            await self.prune_duplicate_vidpid({bus_id})
 
         # 0) Raw USB bridge — for vendor-specific devices (e.g. Mimaki) where
         #    the host application uses direct IOKit USB access, not serial.
@@ -237,6 +239,74 @@ class ForwardingManager:
 
     def get_all_shared(self) -> list[ForwardState]:
         return list(self._states.values())
+
+    def unique_shared_count(self) -> int:
+        """Count unique shared peripherals by VID:PID (not leftover bus_ids)."""
+        seen: set[tuple[str, str]] = set()
+        for state in self._states.values():
+            if state.vendor_id and state.product_id:
+                seen.add((state.vendor_id.lower(), state.product_id.lower()))
+            else:
+                seen.add(("bus", state.bus_id))
+        return len(seen)
+
+    async def prune_duplicate_vidpid(self, visible_bus_ids: set[str] | None = None):
+        """Drop stale share states that share a VID:PID with a newer bus_id."""
+        groups: dict[tuple[str, str], list[ForwardState]] = {}
+        for state in self._states.values():
+            if not state.vendor_id or not state.product_id:
+                continue
+            key = (state.vendor_id.lower(), state.product_id.lower())
+            groups.setdefault(key, []).append(state)
+
+        dropped: list[str] = []
+        for states in groups.values():
+            if len(states) <= 1:
+                continue
+            keep = self._pick_canonical_state(states, visible_bus_ids)
+            for state in states:
+                if state.bus_id == keep.bus_id:
+                    continue
+                self._absorb_stale_state(keep, state)
+                dropped.append(state.bus_id)
+
+        if dropped:
+            logger.info(f"Pruned stale share states for the same VID:PID: {dropped}")
+            self.save_state()
+
+    def _pick_canonical_state(
+        self, states: list[ForwardState], visible_bus_ids: set[str] | None,
+    ) -> ForwardState:
+        visible = [s for s in states if visible_bus_ids and s.bus_id in visible_bus_ids]
+        if visible:
+            return visible[0]
+        active = [
+            s for s in states
+            if s.bus_id in self._usb_bridges or s.usbip_shared or s.serial_proc
+        ]
+        if active:
+            return active[0]
+        return states[0]
+
+    def _absorb_stale_state(self, keep: ForwardState, stale: ForwardState):
+        """Move live resources from a leftover bus_id onto the kept state."""
+        stale_bridge = self._usb_bridges.pop(stale.bus_id, None)
+        if stale_bridge and keep.bus_id not in self._usb_bridges:
+            self._usb_bridges[keep.bus_id] = stale_bridge
+            keep.serial_port = keep.serial_port or stale.serial_port
+            keep.serial_dev = keep.serial_dev or stale.serial_dev
+            keep.attach_mode = keep.attach_mode or stale.attach_mode
+        if stale.usbip_shared and not keep.usbip_shared:
+            keep.usbip_shared = True
+            keep.usbip_busid = keep.usbip_busid or stale.usbip_busid
+            keep.attach_mode = keep.attach_mode or stale.attach_mode
+        if stale.auto_share:
+            keep.auto_share = True
+        if stale.serial_proc and not keep.serial_proc:
+            keep.serial_proc = stale.serial_proc
+            keep.serial_port = keep.serial_port or stale.serial_port
+            keep.serial_dev = keep.serial_dev or stale.serial_dev
+        self._states.pop(stale.bus_id, None)
 
     def get_forward_info(self, bus_id: str) -> dict:
         """Return available forwarding methods for a device."""

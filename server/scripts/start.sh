@@ -1,8 +1,9 @@
 #!/bin/bash
 set -e
 
+VERSION=$(tr -d '[:space:]' < /app/VERSION 2>/dev/null || echo "0.0.0")
 echo "=========================================="
-echo "  Loki-PrintServer v1.0.0"
+echo "  Loki-PrintServer v${VERSION}"
 echo "  USB over IP Server — by BangerTECH"
 echo "=========================================="
 

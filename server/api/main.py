@@ -7,11 +7,13 @@ import json
 import logging
 import os
 import time
+from collections import deque
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import psutil
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,8 +31,48 @@ from .models import (
     UnshareRequest,
 )
 from .usbip import USBIPManager
+from .version import APP_VERSION
 
-logging.basicConfig(level=logging.INFO)
+_LOG_FILE = Path(os.getenv("LOKI_DATA_DIR", "/etc/loki-printserver")) / "loki-server.log"
+_LOG_BUFFER: deque[str] = deque(maxlen=500)
+_LOG_HANDLERS: list[logging.Handler] = []
+
+
+class _RingBufferHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            _LOG_BUFFER.append(self.format(record))
+        except Exception:
+            self.handleError(record)
+
+
+def _setup_logging() -> None:
+    if not _LOG_HANDLERS:
+        fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        ring = _RingBufferHandler()
+        ring.setFormatter(fmt)
+        _LOG_HANDLERS.append(ring)
+        try:
+            _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = RotatingFileHandler(
+                _LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8",
+            )
+            file_handler.setFormatter(fmt)
+            _LOG_HANDLERS.append(file_handler)
+        except OSError as e:
+            logging.getLogger("loki-printserver").warning("File logging unavailable: %s", e)
+
+    logging.basicConfig(level=logging.INFO, handlers=_LOG_HANDLERS, force=True)
+    for name in ("loki-printserver", "uvicorn", "uvicorn.error", "uvicorn.access"):
+        log = logging.getLogger(name)
+        log.setLevel(logging.INFO)
+        for handler in _LOG_HANDLERS:
+            if handler not in log.handlers:
+                log.addHandler(handler)
+        log.propagate = False
+
+
+_setup_logging()
 logger = logging.getLogger("loki-printserver")
 
 usbip_manager = USBIPManager()
@@ -117,7 +159,8 @@ async def _auto_share_all():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting Loki-PrintServer...")
+    _setup_logging()
+    logger.info("Starting Loki-PrintServer v%s...", APP_VERSION)
     _load_custom_names()
     await usbip_manager.start()
     await mdns_announcer.start(
@@ -143,7 +186,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Loki-PrintServer",
     description="USB over IP Server - Share USB devices over the network",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -158,7 +201,7 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0", "service": "loki-printserver"}
+    return {"status": "ok", "version": APP_VERSION, "service": "loki-printserver"}
 
 
 @app.get("/api/status", response_model=ServerStatus)
@@ -166,21 +209,36 @@ async def get_status():
     """Get server status and system info."""
     cpu = psutil.cpu_percent(interval=0.1)
     mem = psutil.virtual_memory()
-    shared = forwarder.get_all_shared()
+    await forwarder.prune_duplicate_vidpid()
     return ServerStatus(
         running=True,
-        version="1.0.0",
+        version=APP_VERSION,
         cpu_percent=cpu,
         memory_used_mb=mem.used // 1024 // 1024,
         memory_total_mb=mem.total // 1024 // 1024,
-        shared_device_count=len(shared),
+        shared_device_count=forwarder.unique_shared_count(),
         uptime_seconds=int(time.time() - psutil.boot_time()),
     )
 
 
-def _merge_shared_devices(devices: list[DeviceInfo]) -> list[DeviceInfo]:
+@app.get("/api/logs")
+async def get_logs(lines: int = Query(80, ge=1, le=500)):
+    """Return the last lines of the server log (file, then in-memory buffer)."""
+    text_lines: list[str] = []
+    if _LOG_FILE.exists():
+        try:
+            text_lines = _LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError as e:
+            logger.warning("Could not read log file: %s", e)
+    if not text_lines:
+        text_lines = list(_LOG_BUFFER)
+    return {"lines": text_lines[-lines:]}
+
+
+async def _merge_shared_devices(devices: list[DeviceInfo]) -> list[DeviceInfo]:
     """Keep shared plotters visible when pyusb/usbip temporarily hides them."""
     visible_ids = {d.bus_id for d in devices}
+    await forwarder.prune_duplicate_vidpid(visible_ids)
     visible_vidpid = {(d.vendor_id, d.product_id) for d in devices}
     for dev in devices:
         state = forwarder.find_state(dev.bus_id, dev.vendor_id, dev.product_id)
@@ -211,7 +269,7 @@ def _merge_shared_devices(devices: list[DeviceInfo]) -> list[DeviceInfo]:
 @app.get("/api/devices", response_model=list[DeviceInfo])
 async def list_devices():
     """List all USB devices with forwarding info."""
-    devices = _merge_shared_devices(await usbip_manager.list_devices())
+    devices = await _merge_shared_devices(await usbip_manager.list_devices())
     _apply_custom_names(devices)
     return devices
 
@@ -219,7 +277,7 @@ async def list_devices():
 @app.get("/api/devices/shared", response_model=list[DeviceInfo])
 async def list_shared_devices():
     """List only shared devices."""
-    devices = _merge_shared_devices(await usbip_manager.list_devices())
+    devices = await _merge_shared_devices(await usbip_manager.list_devices())
     result = [d for d in devices if d.is_shared]
     _apply_custom_names(result)
     return result

@@ -591,6 +591,9 @@ class LokiPystrayApp:
 
         self._running = True
         self._attach_warned: set[str] = set()
+        # Timestamp (monotonic) of last auto-attach failure per bus_id.
+        # Used to throttle retries so usbip.exe isn't spawned every 5 s.
+        self._attach_failed_at: dict[str, float] = {}
         self._icon = pystray.Icon(
             "loki-client",
             make_tray_icon(False),
@@ -600,13 +603,24 @@ class LokiPystrayApp:
         threading.Thread(target=self._poll_loop, daemon=True).start()
         self._icon.run()
 
+    # Minimum seconds between auto-attach retries for the same device.
+    _ATTACH_RETRY_SECS = 60.0
+
     def _auto_attach_shared(self, conn: ServerConnection):
         if self.attacher.is_attaching():
             log.debug("Attach already in progress (password dialog?), skipping auto-attach")
             return
         already = set(self.attacher.get_attached())
+        now = time.monotonic()
         for dev in conn.devices:
             if dev.is_infrastructure or dev.bus_id in already or not dev.is_shared:
+                continue
+            # Throttle retries: don't spawn usbip.exe more often than once per minute.
+            # Without this, every 5-s poll would flash a console window on failure.
+            fail_time = self._attach_failed_at.get(dev.bus_id, 0.0)
+            if now - fail_time < self._ATTACH_RETRY_SECS:
+                log.debug("Skipping auto-attach for %s (retry in %.0fs)",
+                          dev.bus_id, self._ATTACH_RETRY_SECS - (now - fail_time))
                 continue
             log.info("pystray auto-attaching %s (bus=%s)", dev.display_name, dev.bus_id)
             fwd = dev.forward_info
@@ -618,8 +632,13 @@ class LokiPystrayApp:
             log.info("pystray auto-attach %s → %s (%s)",
                      dev.bus_id, result.status, result.local_device)
             if result.status != AttachStatus.ATTACHED:
+                self._attach_failed_at[dev.bus_id] = now
                 self._attach_warned.add(dev.bus_id)
                 log.warning("auto-attach failed for %s: %s", dev.bus_id, result.message)
+            else:
+                # Successful attach — clear any previous failure record
+                self._attach_failed_at.pop(dev.bus_id, None)
+                self._attach_warned.discard(dev.bus_id)
 
     def _detach_unshared(self, conn: ServerConnection):
         """Auto-detach devices that were unshared on the server."""
@@ -628,6 +647,13 @@ class LokiPystrayApp:
             if bus_id not in shared_ids:
                 log.info("Auto-detaching %s (no longer shared on server)", bus_id)
                 self.attacher.detach(bus_id)
+                self._attach_warned.discard(bus_id)
+                self._attach_failed_at.pop(bus_id, None)
+        # Also clear failure history for bus_ids no longer visible on server at all
+        # so a device that went away and came back gets a fresh attach attempt.
+        for bus_id in list(self._attach_failed_at):
+            if bus_id not in shared_ids:
+                self._attach_failed_at.pop(bus_id, None)
                 self._attach_warned.discard(bus_id)
 
     def _connect_all(self):
@@ -729,9 +755,13 @@ class LokiPystrayApp:
             info = self.attacher.get_attach_info(dev.bus_id)
             self.attacher.detach(dev.bus_id)
             self._attach_warned.discard(dev.bus_id)
+            self._attach_failed_at.pop(dev.bus_id, None)
             if info and info.method == AttachMethod.USBIP:
                 self._restore_mac_bridge(conn, dev)
         else:
+            # Manual attach: always try regardless of previous auto-attach failure
+            self._attach_failed_at.pop(dev.bus_id, None)
+            self._attach_warned.discard(dev.bus_id)
             fwd_info = dev.forward_info
             if conn.client:
                 conn.client.share_device(dev.bus_id)

@@ -8,6 +8,8 @@ import socket
 from zeroconf import ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
+from .version import APP_VERSION
+
 logger = logging.getLogger("loki-printserver.discovery")
 
 # RFC 6335: service type labels must be ≤ 15 chars (without underscore)
@@ -32,7 +34,7 @@ class MDNSAnnouncer:
                 addresses=[socket.inet_aton(local_ip)],
                 port=port,
                 properties={
-                    "version": "1.0.0",
+                    "version": APP_VERSION,
                     "host": hostname,
                     "api_port": str(port + 1),
                 },
