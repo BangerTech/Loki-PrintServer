@@ -68,7 +68,6 @@ def _notify(title: str, message: str):
         from tkinter import messagebox
         root = tk.Tk()
         root.withdraw()
-        root.attributes("-topmost", True)
         messagebox.showinfo(title, message)
         root.destroy()
     except Exception:
@@ -618,9 +617,9 @@ class LokiPystrayApp:
                                          usb_info=_usb_info(dev))
             log.info("pystray auto-attach %s → %s (%s)",
                      dev.bus_id, result.status, result.local_device)
-            if result.status != AttachStatus.ATTACHED and dev.bus_id not in self._attach_warned:
+            if result.status != AttachStatus.ATTACHED:
                 self._attach_warned.add(dev.bus_id)
-                _notify("Loki-Client — Plotter not attached", result.message)
+                log.warning("auto-attach failed for %s: %s", dev.bus_id, result.message)
 
     def _detach_unshared(self, conn: ServerConnection):
         """Auto-detach devices that were unshared on the server."""

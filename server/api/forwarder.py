@@ -210,6 +210,31 @@ class ForwardingManager:
     def get_state(self, bus_id: str) -> ForwardState | None:
         return self._states.get(bus_id)
 
+    def find_state(self, bus_id: str, vendor_id: str = "",
+                   product_id: str = "") -> ForwardState | None:
+        """Resolve share state by bus_id, then by VID:PID if USB re-enumerated."""
+        state = self._states.get(bus_id)
+        if state:
+            return state
+        if vendor_id and product_id:
+            for s in self._states.values():
+                if s.vendor_id == vendor_id and s.product_id == product_id:
+                    if s.bus_id != bus_id:
+                        self._rebind_bus_id(s, bus_id)
+                    return s
+        return None
+
+    def _rebind_bus_id(self, state: ForwardState, new_bus_id: str):
+        old = state.bus_id
+        if old == new_bus_id:
+            return
+        logger.info(f"USB re-enumerated {old} → {new_bus_id} ({state.vendor_id}:{state.product_id})")
+        self._states.pop(old, None)
+        if old in self._usb_bridges:
+            self._usb_bridges[new_bus_id] = self._usb_bridges.pop(old)
+        state.bus_id = new_bus_id
+        self._states[new_bus_id] = state
+
     def get_all_shared(self) -> list[ForwardState]:
         return list(self._states.values())
 

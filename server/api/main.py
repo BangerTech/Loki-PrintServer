@@ -178,15 +178,40 @@ async def get_status():
     )
 
 
+def _merge_shared_devices(devices: list[DeviceInfo]) -> list[DeviceInfo]:
+    """Keep shared plotters visible when pyusb/usbip temporarily hides them."""
+    visible_ids = {d.bus_id for d in devices}
+    visible_vidpid = {(d.vendor_id, d.product_id) for d in devices}
+    for dev in devices:
+        state = forwarder.find_state(dev.bus_id, dev.vendor_id, dev.product_id)
+        if state:
+            dev.is_shared = True
+            dev.forward_info = forwarder.get_forward_info(state.bus_id)
+    for state in forwarder.get_all_shared():
+        if state.bus_id in visible_ids:
+            continue
+        if (state.vendor_id, state.product_id) in visible_vidpid:
+            continue
+        devices.append(DeviceInfo(
+            bus_id=state.bus_id,
+            vendor_id=state.vendor_id,
+            product_id=state.product_id,
+            manufacturer=None,
+            product=state.product_name or None,
+            serial=None,
+            device_class=state.device_class or None,
+            speed=None,
+            is_shared=True,
+            is_infrastructure=False,
+            forward_info=forwarder.get_forward_info(state.bus_id),
+        ))
+    return devices
+
+
 @app.get("/api/devices", response_model=list[DeviceInfo])
 async def list_devices():
     """List all USB devices with forwarding info."""
-    devices = await usbip_manager.list_devices()
-    for dev in devices:
-        state = forwarder.get_state(dev.bus_id)
-        if state:
-            dev.is_shared = True
-            dev.forward_info = forwarder.get_forward_info(dev.bus_id)
+    devices = _merge_shared_devices(await usbip_manager.list_devices())
     _apply_custom_names(devices)
     return devices
 
@@ -194,14 +219,8 @@ async def list_devices():
 @app.get("/api/devices/shared", response_model=list[DeviceInfo])
 async def list_shared_devices():
     """List only shared devices."""
-    devices = await usbip_manager.list_devices()
-    result = []
-    for dev in devices:
-        state = forwarder.get_state(dev.bus_id)
-        if state:
-            dev.is_shared = True
-            dev.forward_info = forwarder.get_forward_info(dev.bus_id)
-            result.append(dev)
+    devices = _merge_shared_devices(await usbip_manager.list_devices())
+    result = [d for d in devices if d.is_shared]
     _apply_custom_names(result)
     return result
 

@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 import subprocess
+import time
 
 import usb.core
 import usb.util
@@ -108,6 +109,7 @@ class USBIPManager:
     def __init__(self):
         self._shared_bus_ids: set[str] = set()
         self._daemon_proc: asyncio.subprocess.Process | None = None
+        self._last_backend_reset = 0.0
 
     async def start(self):
         """Load kernel modules and start usbipd daemon."""
@@ -154,11 +156,14 @@ class USBIPManager:
         shared = self._shared_bus_ids.copy()
 
         try:
-            # Reset libusb backend so hot-plugged devices are discovered.
-            # Without this, libusb_get_device_list() returns a stale cache
-            # from the initial context created at process startup.
-            import usb.backend.libusb1 as _libusb1_mod
-            _libusb1_mod._backend = None
+            # Resetting libusb on every poll steals the device from the raw USB
+            # bridge and makes the plotter vanish from the dashboard. Refresh
+            # the backend at most every 15s so hot-plug still works.
+            now = time.monotonic()
+            if now - self._last_backend_reset > 15:
+                import usb.backend.libusb1 as _libusb1_mod
+                _libusb1_mod._backend = None
+                self._last_backend_reset = now
 
             usb_devices = list(usb.core.find(find_all=True))
         except Exception as e:

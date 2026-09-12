@@ -1,7 +1,7 @@
 ; Loki-PrintServer Windows Installer (Inno Setup)
 ; NOTE: All paths are relative to the location of this .iss file (client/build/)
 #define MyAppName "Loki-Client"
-#define MyAppVersion "1.4.5"
+#define MyAppVersion "1.4.6"
 #define MyAppPublisher "BangerTECH"
 #define MyAppURL "https://github.com/BangerTech/Loki-PrintServer"
 #define MyAppExeName "LokiClient.exe"

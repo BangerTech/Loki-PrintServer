@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.4.5  
+**Version:** 1.4.6  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -427,6 +427,7 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 | `IPersistFile::Save failed; Code 0x80070005. Zugriff verweigert` beim Anlegen von `C:\Users\Public\Desktop\Loki-Client.lnk` | Installer läuft per-user (`PrivilegesRequired=lowest`), die Desktop-Verknüpfung zielte auf `{commondesktop}` (öffentlicher Desktop, braucht Admin) | `{autodesktop}` nutzen — ohne Elevation landet die `.lnk` auf dem Benutzer-Desktop |
 | `Failed to execute script 'tray_app'` / `ValueError: <function …_open_dashboard>` | pystray erlaubt nur 0–2 Positionsargumente; `def _open_dashboard(_, h=host, p=port)` hat 3 → Crash beim Tray-Start | Callbacks über `_pystray_action()` wrappen (nur `icon, item`) |
 | Dashboard „Shared“, FineCut/Plotter nicht grün, kein Schneiden | Windows hat kein virtuelles USB. Client meldete fälschlich `tcp://server:7580` als Attach — FineCut braucht das echte USB-Gerät | Server `attach-mode=usbip`; Setup installiert usbip-win (UAC). Ohne Treiber Dialog statt Fake-Attach |
+| `usbip: error: attacher.exe not found` / UAC „Zulassen“ nicht klickbar | `usbip.exe` sucht `attacher.exe` im Arbeitsverzeichnis (Loki-App), nicht neben sich; Fehlerdialog lag über der UAC | Attach mit `cwd={app}\usbip-win`; kein blockierender Auto-Attach-Dialog |
 
 ---
 
@@ -484,3 +485,4 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-09 | — | **CI / Ruff:** `ruff.toml` mit fester Regelmenge (E/F/UP). `Optional[X]` → `X \| None` in Server- und Client-Code. Verhindert den 76-Fehler-Break durch Ruff 0.16-Defaults (UP045, BLE001, S110, …). |
 || 2026-09 | — | **Fix: Windows Mimaki-Plot:** Client attached CG-SR nur als `tcp://…:7580` (Raw-USB-Bridge) — FineCut sieht kein USB-Gerät. Neu: `POST /api/devices/{bus_id}/attach-mode` schaltet Pi auf USB/IP; Windows hängt per usbip-win an. Ohne usbip-win Dialog statt Fake-Attach. macOS-Bridge unverändert. |
 || 2026-09 | 1.4.5 | **Windows Setup bündelt usbip-win 0.3.5** (signierter VHCI-Treiber). `usbip.exe install` läuft im Setup (Admin/UAC). Anwender muss den Treiber nicht mehr separat holen. macOS unverändert. |
+|| 2026-09 | 1.4.6 | **Fix: `attacher.exe not found`:** usbip.exe wird mit `cwd` + PATH im `usbip-win`-Ordner gestartet. Auto-Attach-Dialog nicht mehr topmost (hat UAC „Zulassen“ überdeckt). **Dashboard-Plotter flackert nicht mehr:** Libusb-Reset max. alle 15s; gesharete Geräte bleiben sichtbar wenn usbip/pyusb sie kurz versteckt; VID:PID-Match nach USB-Re-Enumeration. macOS-Client unverändert. |

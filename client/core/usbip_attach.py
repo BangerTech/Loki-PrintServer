@@ -51,6 +51,20 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
 
 
+def _run_usbip_win(exe: str, args: list[str]) -> subprocess.CompletedProcess:
+    """Run usbip.exe from its own folder so it finds attacher.exe and the .inf files."""
+    folder = os.path.dirname(os.path.abspath(exe))
+    env = os.environ.copy()
+    env["PATH"] = folder + os.pathsep + env.get("PATH", "")
+    return subprocess.run(
+        [exe, *args],
+        cwd=folder,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
 class _PtyBridge:
     """
     Pure-Python TCP → PTY bridge for macOS/Linux serial devices.
@@ -555,8 +569,9 @@ class DeviceAttacher:
                     "FineCut will then see the plotter as a local USB device."
                 ),
             )
-        log.info("usbip-win attach %s -r %s -b %s", exe, server_ip, bus_id)
-        r = _run([exe, "attach", "-r", server_ip, "-b", bus_id])
+        log.info("usbip-win attach %s -r %s -b %s (cwd=%s)",
+                 exe, server_ip, bus_id, os.path.dirname(exe))
+        r = _run_usbip_win(exe, ["attach", "-r", server_ip, "-b", bus_id])
         if r.returncode == 0:
             return AttachResult(
                 AttachStatus.ATTACHED, AttachMethod.USBIP,
@@ -591,7 +606,7 @@ class DeviceAttacher:
         elif OS == "Windows":
             exe = self._find_usbip_win()
             if exe:
-                _run([exe, "detach", "-b", bus_id])
+                _run_usbip_win(exe, ["detach", "-b", bus_id])
         elif OS == "Darwin" and shutil.which("limactl"):
             _run(["limactl", "shell", "default", "sh", "-c",
                   f"sudo usbip detach -b {bus_id}"])
@@ -618,6 +633,11 @@ class DeviceAttacher:
             r"C:\usbip-win\usbip.exe",
             r"C:\usbip-win2\usbip.exe",
         ))
+        for p in candidates:
+            if not p or not os.path.exists(p):
+                continue
+            if os.path.exists(os.path.join(os.path.dirname(p), "attacher.exe")):
+                return p
         for p in candidates:
             if p and os.path.exists(p):
                 return p

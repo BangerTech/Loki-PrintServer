@@ -376,7 +376,7 @@
     loadStatus();
     loadDevices();
     connectWS();
-    setInterval(() => { loadStatus(); }, 5000);
+    setInterval(() => { loadStatus(); loadDevices(); }, 5000);
   </script>
 </body>
 </html>
