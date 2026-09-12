@@ -25,7 +25,7 @@ docker compose up -d
 Unter **https://github.com/BangerTech/Loki-PrintServer/releases** die neueste Version herunterladen:
 
 - **macOS:** `Loki-Client.dmg` → in Applications ziehen → Rechtsklick → Öffnen (einmalig, da nicht notarisiert)
-- **Windows:** `LokiClient-Setup.exe` → Installer ausführen
+- **Windows:** `LokiClient-Setup.exe` → Installer ausführen. Für **Mimaki FineCut** zusätzlich [usbip-win](https://github.com/cezanne/usbip-win/releases) installieren (Treiber als Administrator), sonst erscheint der Plotter nicht als lokales USB-Gerät.
 - **Linux:** `Loki-Client-linux` → ausführbar machen und starten
 
 ---
@@ -111,6 +111,7 @@ Client (Mac/Win/Linux)
 | POST | `/api/devices/share` | Gerät freigeben (USB/IP + Serial + CUPS) |
 | POST | `/api/devices/unshare` | Freigabe beenden |
 | POST | `/api/devices/{bus_id}/auto-share?enabled=true\|false` | Auto-Share-Flag setzen |
+| POST | `/api/devices/{bus_id}/attach-mode` | Mimaki: `"usbip"` (Windows) oder `"bridge"` (macOS FineCut) |
 | GET | `/api/devices/{bus_id}/forward` | Forwarding-Details eines Geräts |
 | PUT | `/api/devices/{bus_id}/name` | Custom-Name setzen (`{"name":"..."}`, leer = Reset) |
 | GET | `/api/config` | Server-Konfiguration |
@@ -285,9 +286,9 @@ Geräte der Klasse `Vendor Specific` oder `Device` mit bekannter VID:PID werden 
 
 | Methode | macOS | Windows | Linux |
 |---------|-------|---------|-------|
-| Virtual USB (CDC-ACM) | ✅ `/dev/cu.usbmodem*` (AMFI disabled) | — | — |
-| USB/IP | Lima VM (optional) | usbip-win | nativ |
-| Serial (PTY) | ✅ `/tmp/tty.loki-*` (Fallback) | com0com / TCP | ✅ `/dev/ttyLOKI*` |
+| Virtual USB (CDC-ACM / Vendor) | ✅ `/dev/cu.usbmodem*` + FineCut Vendor-USB (AMFI disabled) | — | — |
+| USB/IP | Lima VM (optional) | ✅ usbip-win (Mimaki CG-SR) | nativ |
+| Serial (PTY / COM) | ✅ `/tmp/tty.loki-*` (Fallback) | com0com + com2tcp | ✅ `/dev/ttyLOKI*` |
 | IPP/CUPS | ✅ Netzwerkdrucker | ✅ Windows IPP | ✅ lpadmin |
 
 ### macOS Virtual USB (loki-usb-helper)
@@ -424,6 +425,7 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 |---------|---------|-----|
 | `IPersistFile::Save failed; Code 0x80070005. Zugriff verweigert` beim Anlegen von `C:\Users\Public\Desktop\Loki-Client.lnk` | Installer läuft per-user (`PrivilegesRequired=lowest`), die Desktop-Verknüpfung zielte auf `{commondesktop}` (öffentlicher Desktop, braucht Admin) | `{autodesktop}` nutzen — ohne Elevation landet die `.lnk` auf dem Benutzer-Desktop |
 | `Failed to execute script 'tray_app'` / `ValueError: <function …_open_dashboard>` | pystray erlaubt nur 0–2 Positionsargumente; `def _open_dashboard(_, h=host, p=port)` hat 3 → Crash beim Tray-Start | Callbacks über `_pystray_action()` wrappen (nur `icon, item`) |
+| Dashboard „Shared“, FineCut/Plotter nicht grün, kein Schneiden | Windows hat kein virtuelles USB. Client meldete fälschlich `tcp://server:7580` als Attach — FineCut braucht das echte USB-Gerät | Server `attach-mode=usbip`, Client **usbip-win**. Ohne Treiber erscheint ein Dialog statt Fake-Attach |
 
 ---
 
@@ -479,3 +481,4 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-04 | — | **CI / Doku:** Ruff-Fixes (`F541` überflüssige `f`-Strings in `usbip_attach.py`; `F401`/`F811`/`F541` in `usb_bridge.py`). `loki-printserver.md`: Abschnitt CI/Lint + Billing-Hinweis. README: Lizenzblock ohne Third-Party-Disclaimer-Zeile. |
 || 2026-09 | 1.4.4 | **Fix: Windows Installer + Tray:** Desktop-Shortcut `{commondesktop}` → `{autodesktop}` (kein `0x80070005` mehr auf `C:\Users\Public\Desktop`). pystray-Callbacks über `_pystray_action()` gewrappt — Tray startet wieder (`ValueError` durch >2 Positionsargumente). |
 || 2026-09 | — | **CI / Ruff:** `ruff.toml` mit fester Regelmenge (E/F/UP). `Optional[X]` → `X \| None` in Server- und Client-Code. Verhindert den 76-Fehler-Break durch Ruff 0.16-Defaults (UP045, BLE001, S110, …). |
+|| 2026-09 | — | **Fix: Windows Mimaki-Plot:** Client attached CG-SR nur als `tcp://…:7580` (Raw-USB-Bridge) — FineCut sieht kein USB-Gerät. Neu: `POST /api/devices/{bus_id}/attach-mode` schaltet Pi auf USB/IP; Windows hängt per usbip-win an. Ohne usbip-win Dialog statt Fake-Attach. macOS-Bridge unverändert. |

@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from .discovery import MDNSAnnouncer
 from .forwarder import ForwardingManager
 from .models import (
+    AttachModeRequest,
     ConnectedClient,
     DeviceInfo,
     RenameRequest,
@@ -283,6 +284,19 @@ async def get_forward_info(bus_id: str):
     if not info.get("shared"):
         raise HTTPException(status_code=404, detail="Device not shared")
     return info
+
+
+@app.post("/api/devices/{bus_id}/attach-mode")
+async def set_attach_mode(bus_id: str, req: AttachModeRequest):
+    """Switch Mimaki/raw-USB devices between Mac USB-bridge and Windows USB/IP."""
+    try:
+        info = await forwarder.set_attach_mode(bus_id, req.mode.strip().lower())
+        await broadcast_event("device_shared", {"bus_id": bus_id, "forward_info": info})
+        return {"success": True, "bus_id": bus_id, "forward_info": info}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/api/clients", response_model=list[ConnectedClient])

@@ -51,7 +51,7 @@ from core.api_client import DeviceInfo, LokiAPIClient, ServerStatus  # noqa: E40
 from core.config import LokiConfig, ServerEntry  # noqa: E402
 from core.device_db import get_display_name  # noqa: E402
 from core.discovery import DiscoveredServer, LokiDiscovery  # noqa: E402
-from core.usbip_attach import AttachStatus, DeviceAttacher  # noqa: E402
+from core.usbip_attach import AttachMethod, AttachStatus, DeviceAttacher  # noqa: E402
 
 try:
     import pystray
@@ -59,6 +59,27 @@ try:
     HAS_PYSTRAY = True
 except ImportError:
     HAS_PYSTRAY = False
+
+
+def _notify(title: str, message: str):
+    """Show a desktop message (Windows/Linux). Safe to call from a tray thread."""
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        messagebox.showinfo(title, message)
+        root.destroy()
+    except Exception:
+        log.warning("%s: %s", title, message)
+
+
+def _is_raw_usb(dev: DeviceInfo, fwd: dict | None) -> bool:
+    serial = (fwd or {}).get("serial") or {}
+    if str(serial.get("device") or "").startswith("usb-bridge:"):
+        return True
+    return (dev.vendor_id or "").lower() == "0a50"
 
 
 def _usb_info(dev: DeviceInfo) -> dict:
@@ -570,6 +591,7 @@ class LokiPystrayApp:
         threading.Thread(target=self._connect_all, daemon=True).start()
 
         self._running = True
+        self._attach_warned: set[str] = set()
         self._icon = pystray.Icon(
             "loki-client",
             make_tray_icon(False),
@@ -591,10 +613,14 @@ class LokiPystrayApp:
             fwd = dev.forward_info
             if conn.client and not fwd:
                 fwd = conn.client.get_forward_info(dev.bus_id) or {}
+            fwd = self._prepare_windows_attach(conn, dev, fwd)
             result = self.attacher.attach(conn.entry.host, dev.bus_id, forward_info=fwd,
                                          usb_info=_usb_info(dev))
             log.info("pystray auto-attach %s → %s (%s)",
                      dev.bus_id, result.status, result.local_device)
+            if result.status != AttachStatus.ATTACHED and dev.bus_id not in self._attach_warned:
+                self._attach_warned.add(dev.bus_id)
+                _notify("Loki-Client — Plotter not attached", result.message)
 
     def _detach_unshared(self, conn: ServerConnection):
         """Auto-detach devices that were unshared on the server."""
@@ -603,6 +629,7 @@ class LokiPystrayApp:
             if bus_id not in shared_ids:
                 log.info("Auto-detaching %s (no longer shared on server)", bus_id)
                 self.attacher.detach(bus_id)
+                self._attach_warned.discard(bus_id)
 
     def _connect_all(self):
         log.info("pystray: initial connection pass")
@@ -679,17 +706,43 @@ class LokiPystrayApp:
         self._icon.icon = make_tray_icon(connected)
         self._icon.menu = self._build_menu()
 
+    def _prepare_windows_attach(self, conn: ServerConnection,
+                                dev: DeviceInfo, fwd: dict | None) -> dict | None:
+        if OS != "Windows" or not _is_raw_usb(dev, fwd):
+            return fwd
+        if not self.attacher._find_usbip_win():
+            return fwd
+        if conn.client:
+            info = conn.client.set_attach_mode(dev.bus_id, "usbip")
+            if info:
+                return info
+        return fwd
+
+    def _restore_mac_bridge(self, conn: ServerConnection, dev: DeviceInfo):
+        if OS != "Windows" or not conn.client:
+            return
+        if (dev.vendor_id or "").lower() != "0a50":
+            return
+        conn.client.set_attach_mode(dev.bus_id, "bridge")
+
     def _toggle_device(self, dev: DeviceInfo, conn: ServerConnection):
         if dev.bus_id in self.attacher.get_attached():
+            info = self.attacher.get_attach_info(dev.bus_id)
             self.attacher.detach(dev.bus_id)
+            self._attach_warned.discard(dev.bus_id)
+            if info and info.method == AttachMethod.USBIP:
+                self._restore_mac_bridge(conn, dev)
         else:
             fwd_info = dev.forward_info
             if conn.client:
                 conn.client.share_device(dev.bus_id)
                 fwd_info = conn.client.get_forward_info(dev.bus_id) or fwd_info
-            self.attacher.attach(conn.entry.host, dev.bus_id,
-                                 forward_info=fwd_info,
-                                 usb_info=_usb_info(dev))
+            fwd_info = self._prepare_windows_attach(conn, dev, fwd_info)
+            result = self.attacher.attach(conn.entry.host, dev.bus_id,
+                                          forward_info=fwd_info,
+                                          usb_info=_usb_info(dev))
+            if result.status != AttachStatus.ATTACHED:
+                _notify("Loki-Client — Plotter not attached", result.message)
         conn.refresh()
         self._refresh_icon()
 

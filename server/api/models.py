@@ -33,6 +33,10 @@ class UnshareRequest(BaseModel):
     bus_id: str
 
 
+class AttachModeRequest(BaseModel):
+    mode: str  # "usbip" (Windows) or "bridge" (macOS FineCut)
+
+
 class ConnectedClient(BaseModel):
     ip: str
     port: int

@@ -43,6 +43,8 @@ class ForwardState:
     product_id: str = ""
     product_name: str = ""
     auto_share: bool = False  # user explicitly set this device to auto-share
+    attach_mode: str = ""  # "bridge" | "usbip" | "serial"
+    usbip_busid: str | None = None
 
 
 @dataclass
@@ -62,6 +64,7 @@ class ForwardingManager:
     def __init__(self):
         self._states: dict[str, ForwardState] = {}
         self._next_serial_port = SERIAL_PORT_BASE
+        self._usb_bridges: dict = {}
 
     # ── Persistence ────────────────────────────────────────────────────────────
 
@@ -141,6 +144,8 @@ class ForwardingManager:
                 if await bridge.start():
                     state.serial_port = port
                     state.serial_dev = f"usb-bridge:{vendor_id}:{product_id}"
+                    state.attach_mode = "bridge"
+                    self._usb_bridges[bus_id] = bridge
                     logger.info(
                         f"Raw USB bridge active for {bus_id} ({vendor_id}:{product_id}) "
                         f"→ TCP:{port}"
@@ -185,6 +190,10 @@ class ForwardingManager:
         if not state:
             return
 
+        bridge = self._usb_bridges.pop(bus_id, None)
+        if bridge:
+            await bridge.stop()
+
         if state.usbip_shared:
             await self._unshare_usbip(state, bus_id)
 
@@ -212,7 +221,9 @@ class ForwardingManager:
         return {
             "shared": True,
             "auto_share": state.auto_share,
+            "attach_mode": state.attach_mode or None,
             "usbip": state.usbip_shared,
+            "usbip_busid": state.usbip_busid,
             "serial": {
                 "available": state.serial_port is not None,
                 "port": state.serial_port,
@@ -223,6 +234,70 @@ class ForwardingManager:
                 "cups_name": state.cups_name,
             },
         }
+
+    async def set_attach_mode(self, bus_id: str, mode: str) -> dict:
+        """Switch a raw-USB device between Mac bridge and Windows USB/IP.
+
+        usbip and the pyusb bridge cannot own the same device at once.
+        """
+        from .usb_bridge import needs_raw_usb
+
+        state = self._states.get(bus_id)
+        if not state:
+            raise ValueError(f"Device {bus_id} is not shared")
+        if not needs_raw_usb(state.vendor_id):
+            raise ValueError("attach-mode is only for raw-USB devices (e.g. Mimaki)")
+        if mode == "usbip":
+            await self._switch_to_usbip(state)
+        elif mode == "bridge":
+            await self._switch_to_bridge(state)
+        else:
+            raise ValueError(f"Unknown attach mode: {mode}")
+        return self.get_forward_info(bus_id)
+
+    async def _switch_to_usbip(self, state: ForwardState):
+        if state.usbip_shared:
+            logger.info(f"USB/IP already active for {state.bus_id}")
+            return
+        bridge = self._usb_bridges.pop(state.bus_id, None)
+        if bridge:
+            await bridge.stop()
+            await asyncio.sleep(1.0)
+        await self._share_usbip(state, state.bus_id)
+        if not state.usbip_shared:
+            logger.error(f"USB/IP bind failed for {state.bus_id}, restoring bridge")
+            await self._switch_to_bridge(state)
+            raise RuntimeError(f"usbip bind failed for {state.bus_id}")
+        state.usbip_busid = await self._resolve_usbip_busid(state.bus_id)
+        state.attach_mode = "usbip"
+        logger.info(f"Switched {state.bus_id} to USB/IP (busid={state.usbip_busid})")
+
+    async def _switch_to_bridge(self, state: ForwardState):
+        from .usb_bridge import USBBridge
+
+        if state.bus_id in self._usb_bridges and not state.usbip_shared:
+            state.attach_mode = "bridge"
+            return
+        if state.usbip_shared:
+            await self._unshare_usbip(state, state.bus_id)
+            state.usbip_busid = None
+            await asyncio.sleep(1.0)
+        port = state.serial_port
+        if not port:
+            port = self._next_serial_port
+            self._next_serial_port += 1
+            state.serial_port = port
+        bridge = USBBridge(
+            vid=int(state.vendor_id, 16),
+            pid=int(state.product_id, 16),
+            tcp_port=port,
+        )
+        if not await bridge.start():
+            raise RuntimeError(f"Could not restart USB bridge for {state.bus_id}")
+        self._usb_bridges[state.bus_id] = bridge
+        state.serial_dev = f"usb-bridge:{state.vendor_id}:{state.product_id}"
+        state.attach_mode = "bridge"
+        logger.info(f"Switched {state.bus_id} back to USB bridge TCP:{port}")
 
     # ── USB/IP ────────────────────────────────────────────────────────────────
 

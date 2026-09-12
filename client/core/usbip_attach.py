@@ -465,9 +465,15 @@ class DeviceAttacher:
                 result = self._attach_ipp_linux(server_ip, ipp_info)
 
         elif OS == "Windows":
+            is_raw_bridge = str(serial_info.get("device") or "").startswith("usb-bridge:")
+            usbip_busid = forward_info.get("usbip_busid") or bus_id
             if has_usbip:
-                result = self._attach_usbip_windows(server_ip, bus_id)
-            if (not result or result.status != AttachStatus.ATTACHED) and has_serial:
+                result = self._attach_usbip_windows(server_ip, usbip_busid)
+            if (
+                (not result or result.status != AttachStatus.ATTACHED)
+                and has_serial
+                and not is_raw_bridge
+            ):
                 result = self._attach_serial_windows(server_ip, serial_info)
             if (not result or result.status != AttachStatus.ATTACHED) and has_ipp:
                 result = self._attach_ipp_windows(server_ip, ipp_info)
@@ -542,15 +548,25 @@ class DeviceAttacher:
         if not exe:
             return AttachResult(
                 AttachStatus.ERROR,
-                message="usbip-win not found.\n"
-                        "Download: https://github.com/cezanne/usbip-win/releases\n"
-                        "Install the driver and restart."
+                message=(
+                    "usbip-win is required for Mimaki / vendor USB on Windows.\n\n"
+                    "1. Download: https://github.com/cezanne/usbip-win/releases\n"
+                    "2. Install the usbip-win driver (as Administrator)\n"
+                    "3. Restart Loki-Client\n\n"
+                    "FineCut will then see the plotter as a local USB device."
+                ),
             )
+        log.info("usbip-win attach %s -r %s -b %s", exe, server_ip, bus_id)
         r = _run([exe, "attach", "-r", server_ip, "-b", bus_id])
         if r.returncode == 0:
-            return AttachResult(AttachStatus.ATTACHED, AttachMethod.USBIP,
-                                "USB device attached via USB/IP")
-        return AttachResult(AttachStatus.ERROR, message=r.stderr.strip())
+            return AttachResult(
+                AttachStatus.ATTACHED, AttachMethod.USBIP,
+                "USB device attached via USB/IP.\n"
+                "Windows should now show the plotter as a local USB device.",
+            )
+        err = (r.stderr or r.stdout or "").strip() or "usbip attach failed"
+        log.error("usbip-win attach failed: %s", err)
+        return AttachResult(AttachStatus.ERROR, message=err)
 
     def _attach_usbip_macos(self, server_ip: str, bus_id: str) -> AttachResult:
         if shutil.which("limactl"):
@@ -586,8 +602,13 @@ class DeviceAttacher:
         for name in ("usbip.exe", "usbip-win.exe"):
             if shutil.which(name):
                 return shutil.which(name)
-        for p in (r"C:\Program Files\usbip-win\usbip.exe",
-                  r"C:\usbip-win\usbip.exe"):
+        for p in (
+            r"C:\Program Files\usbip-win\usbip.exe",
+            r"C:\Program Files\USBip-Win2\usbip.exe",
+            r"C:\Program Files (x86)\usbip-win\usbip.exe",
+            r"C:\usbip-win\usbip.exe",
+            r"C:\usbip-win2\usbip.exe",
+        ):
             if os.path.exists(p):
                 return p
         return None
@@ -708,13 +729,15 @@ class DeviceAttacher:
                 )
 
         return AttachResult(
-            AttachStatus.ATTACHED, AttachMethod.SERIAL,
-            f"Serial device available at:\n"
-            f"  TCP: {server_ip}:{port}\n\n"
-            f"Use in software that supports TCP serial connections.\n"
-            f"Or install com0com for a virtual COM port:\n"
-            f"  https://sourceforge.net/projects/com0com/",
-            local_device=f"tcp://{server_ip}:{port}",
+            AttachStatus.ERROR,
+            message=(
+                f"No virtual COM port on this PC.\n\n"
+                f"The plotter is reachable at {server_ip}:{port}, but Windows "
+                f"cutting software needs a real COM port.\n\n"
+                f"Install com0com + com2tcp:\n"
+                f"  https://sourceforge.net/projects/com0com/\n"
+                f"Then restart Loki-Client."
+            ),
         )
 
     def _detach_serial(self, bus_id: str) -> AttachResult:

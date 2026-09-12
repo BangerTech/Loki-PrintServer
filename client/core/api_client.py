@@ -138,6 +138,16 @@ class LokiAPIClient:
             log.debug("get_forward_info %s: %s", bus_id, e)
             return None
 
+    def set_attach_mode(self, bus_id: str, mode: str) -> dict | None:
+        """Switch raw-USB devices between 'usbip' (Windows) and 'bridge' (macOS)."""
+        try:
+            j = self._post_json(f"/api/devices/{bus_id}/attach-mode", {"mode": mode})
+            log.info("attach-mode %s → %s", bus_id, mode)
+            return j.get("forward_info") or j
+        except Exception as e:
+            log.error("set_attach_mode %s failed: %s", bus_id, e)
+            return None
+
     def unshare_device(self, bus_id: str) -> tuple[bool, str]:
         try:
             j = self._post_json("/api/devices/unshare", {"bus_id": bus_id})

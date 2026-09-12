@@ -62,6 +62,7 @@ class USBBridge:
         self._running = False
         self._client_writer: asyncio.StreamWriter | None = None
         self._lock = threading.Lock()
+        self._server: asyncio.AbstractServer | None = None
 
     async def start(self):
         if not self._open_device():
@@ -69,18 +70,29 @@ class USBBridge:
             return False
 
         self._running = True
-        server = await asyncio.start_server(
+        self._server = await asyncio.start_server(
             self._handle_client, "0.0.0.0", self.tcp_port
         )
         logger.info(
             f"USB bridge: {self.vid:04x}:{self.pid:04x} → TCP:{self.tcp_port}"
         )
-        asyncio.ensure_future(self._serve(server))
+        asyncio.ensure_future(self._serve(self._server))
         return True
 
     async def stop(self):
         self._running = False
+        if self._client_writer:
+            try:
+                self._client_writer.close()
+            except OSError:
+                pass
+            self._client_writer = None
+        if self._server:
+            self._server.close()
+            await self._server.wait_closed()
+            self._server = None
         self._close_device()
+        logger.info(f"USB bridge: stopped {self.vid:04x}:{self.pid:04x}")
 
     def _open_device(self) -> bool:
         try:
