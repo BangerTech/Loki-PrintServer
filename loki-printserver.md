@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.4.14  
+**Version:** 1.4.15  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -503,4 +503,5 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-09 | 1.4.11 | **Fix: Inno Setup Compile `Identifier expected`:** `{...}`-Kommentare im `[Code]`-Block werden als Konstanten gelesen (`{sys}`). Jetzt `//`-Kommentare. `build_windows.bat` bricht bei ISCC-Fehler wirklich ab. |
 || 2026-09 | 1.4.12 | **Windows-Treiber:** usbip-win 0.3.5 durch **usbip-win2 0.9.7.7 (USBip)** ersetzt. Loki-Setup installiert USBip nach Finish **still** (kein zweites Wizard). Client sucht `C:\Program Files\USBip\usbip.exe` zuerst. **Dashboard-Log:** Live-Puffer statt leerer Datei; Windows-Client schickt Attach-Fehler per `POST /api/client-log`. macOS-Client-Pfad unverändert. |
 || 2026-09 | 1.4.13 | **Windows:** USBip legt kein Desktop-Icon mehr an (`/TASKS=""` + Löschen bekannter `.lnk`). Tray-Icon wird **grün** wenn mindestens ein Gerät wirklich attached ist (nicht nur Server erreichbar); Refresh nach Attach-Wechsel. |
+|| 2026-10 | 1.4.15 | **Fix: Installer-Deadlock bei bereits installiertem USBip:** Das Silent-Install-Script (`install-usbip-silent.cmd`) startete `USBip-Setup.exe` immer — bei vorhandener Installation lief dadurch eine Deinstallation + Neuinstallation parallel und blockierte sich am Inno-Setup-Mutex (zwei `USBip-Setup`-Fenster hängen „ewig"). Jetzt: (1) **Skip**, wenn `C:\Program Files\USBip\usbip.exe` bereits existiert (nur Desktop-Shortcuts aufräumen). (2) **Single-Instance-Lock** (`%TEMP%\loki-usbip-install.lock`) verhindert parallele Läufe. |
 || 2026-10 | 1.4.14 | **Fix: Windows-Hänger / Zombie-usbip-Prozesse:** `usbip.exe attach` konnte endlos blockieren (z. B. wenn das Gerät serverseitig nicht exportiert ist) und hat den aufrufenden Thread für immer eingefroren — dabei stapelten sich bis zu 9 `usbip.exe`-Prozesse. Jetzt: (1) **20 s Timeout** in `_run_usbip_win` (attach/port/detach) — hängende Aufrufe werden gekillt und als Fehler gemeldet. (2) **Attach-Serialisierung** per `threading.Lock` + `_attaching`-Set: gleichzeitige Trigger (Initial-Connect, mDNS-Discovery, Poll-Loop) starten nie mehrere Attaches fürs selbe Gerät. (3) `is_attaching()` spiegelt den echten Status auf allen Plattformen. macOS-Client unverändert. |
