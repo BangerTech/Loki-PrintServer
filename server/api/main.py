@@ -31,6 +31,7 @@ from .models import (
     ShareRequest,
     UnshareRequest,
 )
+from .plotcut import PlotCutService, create_router
 from .usbip import USBIPManager
 from .version import APP_VERSION
 
@@ -402,6 +403,31 @@ async def set_attach_mode(bus_id: str, req: AttachModeRequest):
     except RuntimeError as e:
         logger.error("attach-mode %s failed: %s", bus_id, e)
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+def _plotcut_custom_name(vid: str, pid: str) -> str | None:
+    from .plotcut import _norm_hex
+
+    for key, name in _custom_names.items():
+        parts = str(key).split(":")
+        if len(parts) == 2 and _norm_hex(parts[0]) == vid and _norm_hex(parts[1]) == pid:
+            return name
+    return None
+
+
+async def _plotcut_list_usb():
+    devices = await _merge_shared_devices(await usbip_manager.list_devices())
+    _apply_custom_names(devices)
+    return devices
+
+
+plotcut_service = PlotCutService(
+    forwarder=forwarder,
+    list_usb=_plotcut_list_usb,
+    usbip_port=int(os.getenv("LOKI_PORT", 7575)),
+    get_custom_name=_plotcut_custom_name,
+)
+app.include_router(create_router(plotcut_service))
 
 
 @app.get("/api/clients", response_model=list[ConnectedClient])

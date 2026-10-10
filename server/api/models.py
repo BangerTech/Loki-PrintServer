@@ -67,3 +67,16 @@ class ServerConfig(BaseModel):
     api_port: int
     allow_all: bool
     secret_configured: bool
+
+
+class PlotCutDevice(BaseModel):
+    id: str
+    name: str
+    kind: str
+    available: bool
+    attached_to: str | None = None
+
+
+class PlotCutJobResult(BaseModel):
+    ok: bool
+    bytes: int

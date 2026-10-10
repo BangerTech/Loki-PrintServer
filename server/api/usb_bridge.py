@@ -94,6 +94,25 @@ class USBBridge:
         self._close_device()
         logger.info(f"USB bridge: stopped {self.vid:04x}:{self.pid:04x}")
 
+    @property
+    def has_client(self) -> bool:
+        """True while a FineCut/macOS USB-helper client holds the TCP bridge."""
+        return self._client_writer is not None
+
+    def write_raw(self, data: bytes, chunk_size: int = 4096, timeout: int = 30000) -> int:
+        """Write raw plotter bytes to Bulk-OUT (no TCP framing).
+
+        Used by Plot Cut. FineCut still goes through ``_handle_bulk_out``.
+        """
+        if not self._ep_out or not self._dev:
+            raise RuntimeError("USB-Bridge-Endpunkt ist nicht geöffnet")
+        written = 0
+        for offset in range(0, len(data), chunk_size):
+            chunk = data[offset:offset + chunk_size]
+            n = self._ep_out.write(chunk, timeout=timeout)
+            written += int(n)
+        return written
+
     def _open_device(self) -> bool:
         try:
             import usb.core

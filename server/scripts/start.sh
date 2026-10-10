@@ -78,10 +78,17 @@ if command -v cupsd &>/dev/null; then
     echo "    CUPS running on port 631"
 fi
 
+if [ ! -f /etc/loki-printserver/plotcut_devices.json ] && [ -f /app/config/plotcut_devices.json ]; then
+    mkdir -p /etc/loki-printserver
+    cp /app/config/plotcut_devices.json /etc/loki-printserver/plotcut_devices.json
+    echo "[+] Seeded Plot-Cut device config"
+fi
+
 echo "[+] Starting Loki-PrintServer API on port ${LOKI_API_PORT}..."
 echo "[+] USB/IP daemon on port ${LOKI_PORT}"
 echo "[+] Serial forwarding on ports 7580+"
 echo "[+] CUPS/IPP printing on port 631"
+echo "[+] Plot Cut API on /api/plotcut"
 echo ""
 
 cd /app

@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.4.16-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.5.0-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/server-Raspberry%20Pi-red?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/clients-macOS%20%7C%20Windows%20%7C%20Linux-blueviolet?style=flat-square" alt="Clients">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
@@ -37,6 +37,20 @@ docker compose up -d
 That's it. The server is now running.
 
 **Web Dashboard:** open `http://<raspberry-pi-ip>:7576` in your browser.
+
+### Plot Cut API (VectorCraft)
+
+Plot Cut sends **finished** plotter bytes (MGL-IIc / HP-GL). Loki writes them unchanged — it does not generate commands. Illustrator + FineCut keep using USB/IP and the Mac USB bridge as before.
+
+```bash
+curl http://<pi>:7576/api/plotcut/devices
+
+curl --data-binary "IN;PU0,0;PD400,0;PU0,0;" \
+  -H "Content-Type: application/octet-stream" \
+  http://<pi>:7576/api/plotcut/devices/mimaki-cg60sr/job
+```
+
+Stable ids: `mimaki-cg60sr` (Mimaki `0a50:0001`), `vevor` (CH340 `1a86:7523`). Config: `/etc/loki-printserver/plotcut_devices.json`. If a plotter is attached via USB/IP to a PC, the job returns `409` and Loki will not steal the device.
 
 ---
 

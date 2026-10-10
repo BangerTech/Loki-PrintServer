@@ -94,6 +94,10 @@
     }
     .badge-shared { background: rgba(76,175,125,0.15); color: var(--success); border: 1px solid rgba(76,175,125,0.3); }
     .badge-idle { background: rgba(136,136,153,0.15); color: var(--muted); border: 1px solid rgba(136,136,153,0.3); }
+    .badge-busy { background: rgba(240,160,48,0.15); color: var(--warning); border: 1px solid rgba(240,160,48,0.35); }
+    .btn-test { background: rgba(30,144,255,0.15); color: var(--accent2); border: 1px solid rgba(30,144,255,0.35); }
+    .btn-test:hover { background: rgba(30,144,255,0.28); }
+    .btn-test:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
     .btn {
       padding: 8px 18px; border-radius: 8px; border: none; cursor: pointer;
       font-size: 0.85rem; font-weight: 600; transition: all 0.2s;
@@ -213,6 +217,19 @@
 
     <section>
       <h2>
+        ✂️ <span data-i18n="plotcutTitle">Plot Cut</span>
+        <button class="refresh-btn" onclick="loadPlotCut()" data-i18n="refresh">↻ Refresh</button>
+      </h2>
+      <p class="device-meta" style="margin:-8px 0 14px;" data-i18n="plotcutHint">
+        Send finished plotter bytes from VectorCraft. Illustrator / FineCut is unchanged.
+      </p>
+      <div class="device-list" id="plotcutList">
+        <div class="empty" data-i18n="plotcutLoading">Loading Plot Cut devices...</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>
         <span data-i18n="logTitle">Live log</span>
         <button class="refresh-btn" id="logPauseBtn" onclick="toggleLogPause()"></button>
       </h2>
@@ -272,6 +289,18 @@
         statusRunning: 'Server running',
         statusOffline: 'Server offline',
         uptime: 'Uptime {value}',
+        plotcutTitle: 'Plot Cut',
+        plotcutHint: 'Send finished plotter bytes from VectorCraft. Illustrator / FineCut is unchanged.',
+        plotcutLoading: 'Loading Plot Cut devices...',
+        plotcutEmpty: 'No Plot Cut devices configured',
+        plotcutFailed: 'Failed to load Plot Cut devices',
+        plotcutReady: 'Ready',
+        plotcutBusy: 'Busy ({who})',
+        plotcutMissing: 'Not connected',
+        plotcutTest: 'Test job',
+        plotcutTestOk: 'Test job sent ({bytes} bytes)',
+        plotcutTestFailed: 'Test job failed',
+        plotcutKind: 'via {kind}',
       },
       de: {
         usbDevices: 'USB-Geräte',
@@ -316,6 +345,18 @@
         statusRunning: 'Server läuft',
         statusOffline: 'Server offline',
         uptime: 'Laufzeit {value}',
+        plotcutTitle: 'Plot Cut',
+        plotcutHint: 'Fertige Plotterbytes aus VectorCraft senden. Illustrator / FineCut bleibt unverändert.',
+        plotcutLoading: 'Plot-Cut-Geräte werden geladen...',
+        plotcutEmpty: 'Keine Plot-Cut-Geräte konfiguriert',
+        plotcutFailed: 'Plot-Cut-Geräte konnten nicht geladen werden',
+        plotcutReady: 'Bereit',
+        plotcutBusy: 'Belegt ({who})',
+        plotcutMissing: 'Nicht angeschlossen',
+        plotcutTest: 'Testauftrag',
+        plotcutTestOk: 'Testauftrag gesendet ({bytes} Bytes)',
+        plotcutTestFailed: 'Testauftrag fehlgeschlagen',
+        plotcutKind: 'über {kind}',
       },
     };
 
@@ -357,6 +398,7 @@
       applyI18n();
       loadStatus();
       loadDevices();
+      loadPlotCut();
       if (!logPaused) loadLogs();
     }
 
@@ -481,6 +523,65 @@
       }
     }
 
+    function renderPlotCut(d) {
+      let badge;
+      if (d.available) {
+        badge = `<span class="badge badge-shared">${t('plotcutReady')}</span>`;
+      } else if (d.attached_to) {
+        badge = `<span class="badge badge-busy">${t('plotcutBusy', { who: d.attached_to })}</span>`;
+      } else {
+        badge = `<span class="badge badge-idle">${t('plotcutMissing')}</span>`;
+      }
+      const testBtn = d.available
+        ? `<button class="btn btn-test" onclick="plotcutTest('${d.id}')">${t('plotcutTest')}</button>`
+        : `<button class="btn btn-test" disabled>${t('plotcutTest')}</button>`;
+      return `
+        <div class="device-card">
+          <div class="device-icon">✂️</div>
+          <div class="device-info">
+            <div class="device-name">${d.name}</div>
+            <div class="device-meta">${d.id} · ${t('plotcutKind', { kind: d.kind })}</div>
+          </div>
+          ${badge}
+          <div class="device-actions">${testBtn}</div>
+        </div>`;
+    }
+
+    async function loadPlotCut() {
+      const list = document.getElementById('plotcutList');
+      try {
+        const r = await fetch(`${API}/api/plotcut/devices`);
+        const data = await r.json();
+        const devices = data.devices || [];
+        if (!devices.length) {
+          list.innerHTML = `<div class="empty">${t('plotcutEmpty')}</div>`;
+        } else {
+          list.innerHTML = devices.map(renderPlotCut).join('');
+        }
+      } catch (e) {
+        list.innerHTML = `<div class="empty">${t('plotcutFailed')}</div>`;
+      }
+    }
+
+    async function plotcutTest(id) {
+      try {
+        const r = await fetch(`${API}/api/plotcut/devices/${id}/job`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: 'IN;PU0,0;PD400,0;PU0,0;',
+        });
+        const j = await r.json();
+        if (!r.ok) {
+          showToast(j.detail || t('plotcutTestFailed'), false);
+        } else {
+          showToast(t('plotcutTestOk', { bytes: j.bytes }));
+        }
+        setTimeout(loadPlotCut, 300);
+      } catch (e) {
+        showToast(t('plotcutTestFailed'), false);
+      }
+    }
+
     async function loadLogs() {
       const view = document.getElementById('logView');
       try {
@@ -585,6 +686,7 @@
         if (['device_shared', 'device_unshared', 'device_renamed'].includes(msg.event)) {
           loadDevices();
           loadStatus();
+          loadPlotCut();
         }
       };
       ws.onclose = () => setTimeout(connectWS, 3000);
@@ -594,9 +696,10 @@
     applyI18n();
     loadStatus();
     loadDevices();
+    loadPlotCut();
     loadLogs();
     connectWS();
-    setInterval(() => { loadStatus(); loadDevices(); }, 5000);
+    setInterval(() => { loadStatus(); loadDevices(); loadPlotCut(); }, 5000);
     logTimer = setInterval(() => { if (!logPaused) loadLogs(); }, 4000);
   </script>
 </body>

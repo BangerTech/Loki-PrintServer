@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.4.16  
+**Version:** 1.5.0  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -71,6 +71,8 @@ Client (Mac/Win/Linux)
 | `api/models.py` | Pydantic Datenmodelle (inkl. `is_infrastructure`) |
 | `api/usbip.py` | USB-Geräteerkennung (pyusb) + KNOWN_DEVICES Datenbank |
 | `api/forwarder.py` | Forwarding Manager (USB/IP, Serial, CUPS) + State-Persistenz |
+| `api/plotcut.py` | Plot-Cut-API: fertige Rohbytes unverändert an Plotter schreiben |
+| `config/plotcut_devices.json` | Standard-Plot-Cut-Geräte (Mimaki CG-60SR, Vevor) |
 | `api/discovery.py` | mDNS Ankündigung (Zeroconf, Service: `_lokiprint._tcp.local.`) |
 | `scripts/start.sh` | Container-Start (Module, CUPS, avahi, uvicorn) |
 | `web/index.html` | Web-Dashboard |
@@ -118,6 +120,8 @@ Client (Mac/Win/Linux)
 | GET | `/api/devices/{bus_id}/forward` | Forwarding-Details eines Geräts |
 | PUT | `/api/devices/{bus_id}/name` | Custom-Name setzen (`{"name":"..."}`, leer = Reset) |
 | GET | `/api/config` | Server-Konfiguration |
+| GET | `/api/plotcut/devices` | Plot-Cut-Geräte (stabile `id`, `kind`, `available`, `attached_to`) |
+| POST | `/api/plotcut/devices/{id}/job` | Rohbytes (`application/octet-stream`) unverändert an den Plotter |
 | WS | `/ws` | Echtzeit-Updates (`device_shared`, `device_unshared`, `device_renamed`) |
 
 ### Forwarding Info (Response von `/api/devices/share`)
@@ -142,6 +146,28 @@ Client (Mac/Win/Linux)
   }
 }
 ```
+
+### Plot Cut API
+
+VectorCraft / Plot Cut schickt **fertige** Plotterbytes (MGL-IIc, HP-GL). Loki erzeugt und verändert keine Befehle.
+
+```bash
+curl http://<pi>:7576/api/plotcut/devices
+
+curl --data-binary "IN;PU0,0;PD400,0;PU0,0;" \
+  -H "Content-Type: application/octet-stream" \
+  http://<pi>:7576/api/plotcut/devices/mimaki-cg60sr/job
+```
+
+Erfolg: `{"ok": true, "bytes": 23}`. Fehler als FastAPI-`HTTPException` mit deutschem `detail` (404 unbekannt, 409 belegt, 503 nicht angeschlossen, 500 Schreibfehler, 413 > 50 MB).
+
+**Stabile IDs** kommen aus `plotcut_devices.json` (VID:PID), nicht aus `bus_id`. Vorgabe: `mimaki-cg60sr` = `0a50:0001`, `vevor` = `1a86:7523`. Weitere Plotter: `plotter-{vid}-{pid}`. Auf dem Pi mit `lsusb` gegenprüfen.
+
+**Schreibwege:** socat-TCP wenn aktiv (tty nicht parallel öffnen); Mimaki-Bridge `write_raw` auf Bulk-OUT; sonst pyusb Bulk-OUT / `/dev/serial/by-id/` / `/dev/usb/lpX`.
+
+**Belegt:** USB/IP `usbip_status=1` oder unklar → 409, Gerät bleibt am Client. USB/IP nur exportiert → temporär unbind, schreiben, wieder binden. FineCut-Mac an der Bridge oder fremder socat-Client → 409. Ein Auftrag pro Gerät (Lock).
+
+Illustrator + FineCut (Bridge und USB/IP) bleiben unverändert. Keine Auth (wie der Rest der LAN-API).
 
 ---
 
@@ -198,8 +224,11 @@ Dann werden beim Start **alle erkannten Peripheriegeräte** sofort geshared — 
 ```
 /etc/loki-printserver/shared_devices.json
 /etc/loki-printserver/custom_names.json
+/etc/loki-printserver/plotcut_devices.json
 /etc/loki-printserver/loki-server.log
 ```
+
+`/etc/loki-printserver/plotcut_devices.json` — Plot-Cut-Geräte, stabile IDs (VID:PID). Wird beim ersten Start aus `server/config/plotcut_devices.json` kopiert.
 
 `shared_devices.json` (Beispiel):
 ```json
@@ -222,6 +251,32 @@ Dann werden beim Start **alle erkannten Peripheriegeräte** sofort geshared — 
 }
 ```
 
+`plotcut_devices.json` (Beispiel):
+```json
+{
+  "devices": [
+    {
+      "id": "mimaki-cg60sr",
+      "name": "Mimaki CG-60SR",
+      "kind": "usb-vendor",
+      "match": { "vendor": "0a50", "product": "0001" },
+      "path": "",
+      "baud": 9600,
+      "flow": "rtscts"
+    },
+    {
+      "id": "vevor",
+      "name": "Vevor",
+      "kind": "serial",
+      "match": { "vendor": "1a86", "product": "7523" },
+      "path": "",
+      "baud": 9600,
+      "flow": "none"
+    }
+  ]
+}
+```
+
 ---
 
 ## Geräteerkennung & Kategorisierung
@@ -237,7 +292,7 @@ Das Dashboard und die API unterscheiden zwei Kategorien:
 
 Infrastruktur-Geräte werden im Dashboard in einem **ausgeklappten Bereich** am unteren Ende angezeigt (gedimmt, kein Share-Button). Der Gerätezähler oben zeigt nur echte Peripheriegeräte. Die Kachel **Shared** zählt eindeutige Peripherie nach VID:PID (keine toten bus_ids).
 
-Im Header: Versions-Badge aus `/api/status`, Uptime neben dem Status-Punkt, Umschalter **DE/EN** (Browser-Sprache, sonst EN; Wahl in `localStorage`). Unter der Geräteliste: **Live-Protokoll** (`GET /api/logs`, Auto-Refresh, Pause).
+Im Header: Versions-Badge aus `/api/status`, Uptime neben dem Status-Punkt, Umschalter **DE/EN** (Browser-Sprache, sonst EN; Wahl in `localStorage`). Unter der Geräteliste: **Plot Cut**-Bereich (Status + Testauftrag). Darunter: **Live-Protokoll** (`GET /api/logs`, Auto-Refresh, Pause).
 
 **Als Infrastruktur erkannt:**
 - `bDeviceClass == 0x09` (USB Hub)
@@ -504,6 +559,7 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-09 | 1.4.11 | **Fix: Inno Setup Compile `Identifier expected`:** `{...}`-Kommentare im `[Code]`-Block werden als Konstanten gelesen (`{sys}`). Jetzt `//`-Kommentare. `build_windows.bat` bricht bei ISCC-Fehler wirklich ab. |
 || 2026-09 | 1.4.12 | **Windows-Treiber:** usbip-win 0.3.5 durch **usbip-win2 0.9.7.7 (USBip)** ersetzt. Loki-Setup installiert USBip nach Finish **still** (kein zweites Wizard). Client sucht `C:\Program Files\USBip\usbip.exe` zuerst. **Dashboard-Log:** Live-Puffer statt leerer Datei; Windows-Client schickt Attach-Fehler per `POST /api/client-log`. macOS-Client-Pfad unverändert. |
 || 2026-09 | 1.4.13 | **Windows:** USBip legt kein Desktop-Icon mehr an (`/TASKS=""` + Löschen bekannter `.lnk`). Tray-Icon wird **grün** wenn mindestens ein Gerät wirklich attached ist (nicht nur Server erreichbar); Refresh nach Attach-Wechsel. |
+|| 2026-10 | 1.5.0 | **Plot-Cut-API:** `GET /api/plotcut/devices` und `POST /api/plotcut/devices/{id}/job` nehmen fertige MGL-IIc/HP-GL-Rohbytes entgegen und schreiben sie unverändert (kein Generator). Stabile IDs (`mimaki-cg60sr`, `vevor`) per VID:PID-Config. Occupancy: USB/IP-attached, FineCut-Bridge-Client, socat-Remote und Job-Lock → 409, Gerät wird nicht weggenommen. Exportiert-aber-frei: temporärer usbip-unbind, danach wieder binden. Dashboard-Sektion mit Testauftrag. FineCut/USB/IP/socat unverändert. |
 || 2026-10 | 1.4.15 | **Fix: Installer-Deadlock bei bereits installiertem USBip:** Das Silent-Install-Script (`install-usbip-silent.cmd`) startete `USBip-Setup.exe` immer — bei vorhandener Installation lief dadurch eine Deinstallation + Neuinstallation parallel und blockierte sich am Inno-Setup-Mutex (zwei `USBip-Setup`-Fenster hängen „ewig"). Jetzt: (1) **Skip**, wenn `C:\Program Files\USBip\usbip.exe` bereits existiert (nur Desktop-Shortcuts aufräumen). (2) **Single-Instance-Lock** (`%TEMP%\loki-usbip-install.lock`) verhindert parallele Läufe. |
 || 2026-10 | 1.4.16 | **Fix: Client startete USBip-Setup erneut bei „VHCI not loaded“:** 1.4.15 skipped nur im Silent-Skript. Der laufende Client (`_ensure_vhci_driver`) öffnete bei fehlendem VHCI trotzdem den GUI-Installer → Uninstall+Setup-Deadlock. Jetzt: (1) **kein Re-Launch** wenn `usbip.exe` schon da ist — klarer Hinweis neu starten / Speicherintegrität. (2) Erstinstallation nur noch **silent**. (3) Silent-Skript prüft zusätzlich laufende `USBip-Setup.exe`, `unins000.exe` und `ProgramW6432`. |
 || 2026-10 | 1.4.14 | **Fix: Windows-Hänger / Zombie-usbip-Prozesse:** `usbip.exe attach` konnte endlos blockieren (z. B. wenn das Gerät serverseitig nicht exportiert ist) und hat den aufrufenden Thread für immer eingefroren — dabei stapelten sich bis zu 9 `usbip.exe`-Prozesse. Jetzt: (1) **20 s Timeout** in `_run_usbip_win` (attach/port/detach) — hängende Aufrufe werden gekillt und als Fehler gemeldet. (2) **Attach-Serialisierung** per `threading.Lock` + `_attaching`-Set: gleichzeitige Trigger (Initial-Connect, mDNS-Discovery, Poll-Loop) starten nie mehrere Attaches fürs selbe Gerät. (3) `is_attaching()` spiegelt den echten Status auf allen Plattformen. macOS-Client unverändert. |

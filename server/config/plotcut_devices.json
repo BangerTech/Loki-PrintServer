@@ -1,0 +1,22 @@
+{
+  "devices": [
+    {
+      "id": "mimaki-cg60sr",
+      "name": "Mimaki CG-60SR",
+      "kind": "usb-vendor",
+      "match": { "vendor": "0a50", "product": "0001" },
+      "path": "",
+      "baud": 9600,
+      "flow": "rtscts"
+    },
+    {
+      "id": "vevor",
+      "name": "Vevor",
+      "kind": "serial",
+      "match": { "vendor": "1a86", "product": "7523" },
+      "path": "",
+      "baud": 9600,
+      "flow": "none"
+    }
+  ]
+}

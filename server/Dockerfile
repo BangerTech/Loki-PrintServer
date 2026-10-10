@@ -2,7 +2,7 @@ FROM python:3.12-slim-bookworm
 
 LABEL maintainer="Loki-PrintServer"
 LABEL description="Loki USB over IP Server - Share USB devices over the network"
-LABEL version="1.4.7"
+LABEL version="1.5.0"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -33,6 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY api/ ./api/
 COPY scripts/ ./scripts/
 COPY web/ ./web/
+COPY config/ ./config/
 COPY VERSION ./VERSION
 
 RUN chmod +x scripts/*.sh

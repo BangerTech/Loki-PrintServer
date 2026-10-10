@@ -65,6 +65,7 @@ class ForwardingManager:
         self._states: dict[str, ForwardState] = {}
         self._next_serial_port = SERIAL_PORT_BASE
         self._usb_bridges: dict = {}
+        self._plotcut_busy: set[str] = set()
 
     # ── Persistence ────────────────────────────────────────────────────────────
 
@@ -212,6 +213,20 @@ class ForwardingManager:
     def get_state(self, bus_id: str) -> ForwardState | None:
         return self._states.get(bus_id)
 
+    def get_usb_bridge(self, bus_id: str):
+        """Return the live USBBridge for a bus_id, or None."""
+        return self._usb_bridges.get(bus_id)
+
+    def mark_plotcut_busy(self, bus_id: str, busy: bool) -> None:
+        """Block attach-mode / usbip bind while a Plot-Cut job owns the device."""
+        if busy:
+            self._plotcut_busy.add(bus_id)
+        else:
+            self._plotcut_busy.discard(bus_id)
+
+    def is_plotcut_busy(self, bus_id: str) -> bool:
+        return bus_id in self._plotcut_busy
+
     def find_state(self, bus_id: str, vendor_id: str = "",
                    product_id: str = "") -> ForwardState | None:
         """Resolve share state by bus_id, then by VID:PID if USB re-enumerated."""
@@ -340,6 +355,10 @@ class ForwardingManager:
         state = self._states.get(bus_id)
         if not state:
             raise ValueError(f"Device {bus_id} is not shared")
+        if self.is_plotcut_busy(bus_id):
+            raise RuntimeError(
+                f"Plot-Cut-Auftrag läuft auf {bus_id} — Attach-Modus gerade nicht möglich"
+            )
         if not needs_raw_usb(state.vendor_id):
             raise ValueError("attach-mode is only for raw-USB devices (e.g. Mimaki)")
         if mode == "usbip":
@@ -396,7 +415,33 @@ class ForwardingManager:
 
     # ── USB/IP ────────────────────────────────────────────────────────────────
 
-    async def _share_usbip(self, state: ForwardState, bus_id: str):
+    async def pause_usbip_for_plotcut(self, bus_id: str) -> bool:
+        """Temporarily unbind USB/IP so Plot Cut can write. Returns True if it was bound."""
+        state = self._states.get(bus_id)
+        if not state or not state.usbip_shared:
+            return False
+        logger.info(f"Plot Cut: pausing USB/IP export for {bus_id}")
+        await self._unshare_usbip(state, bus_id)
+        await asyncio.sleep(0.5)
+        return True
+
+    async def resume_usbip_after_plotcut(self, bus_id: str) -> None:
+        """Re-export a device via USB/IP after a Plot-Cut job."""
+        state = self._states.get(bus_id)
+        if not state:
+            return
+        await self._share_usbip(state, bus_id, allow_plotcut=True)
+        if state.usbip_shared:
+            state.usbip_busid = await self._resolve_usbip_busid(bus_id)
+            state.attach_mode = "usbip"
+            logger.info(f"Plot Cut: restored USB/IP export for {bus_id}")
+
+    async def _share_usbip(self, state: ForwardState, bus_id: str, *,
+                           allow_plotcut: bool = False):
+        if self.is_plotcut_busy(bus_id) and not allow_plotcut:
+            raise RuntimeError(
+                f"Plot-Cut-Auftrag läuft auf {bus_id} — USB/IP-Bind gerade nicht möglich"
+            )
         usbip_id = await self._resolve_usbip_busid(bus_id)
         if not usbip_id:
             logger.warning(f"Cannot resolve usbip busid for {bus_id}")
