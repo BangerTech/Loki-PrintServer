@@ -57,20 +57,33 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
 
 
-def _run_usbip_win(exe: str, args: list[str]) -> subprocess.CompletedProcess:
-    """Run usbip.exe from its own folder so it finds attacher.exe and the .inf files."""
+def _run_usbip_win(exe: str, args: list[str], timeout: float = 20.0) -> subprocess.CompletedProcess:
+    """Run usbip.exe from its own folder so it finds attacher.exe and the .inf files.
+
+    A timeout is mandatory: a hung `usbip attach` (e.g. device not actually
+    exported on the server) would otherwise block the calling thread forever
+    and pile up zombie usbip.exe processes.
+    """
     folder = os.path.dirname(os.path.abspath(exe))
     env = os.environ.copy()
     env["PATH"] = folder + os.pathsep + env.get("PATH", "")
-    return subprocess.run(
-        [exe, *args],
-        cwd=folder,
-        env=env,
-        capture_output=True,
-        text=True,
-        # Suppress the console window — critical for a system-tray app
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
+    try:
+        return subprocess.run(
+            [exe, *args],
+            cwd=folder,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            # Suppress the console window — critical for a system-tray app
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except subprocess.TimeoutExpired:
+        log.error("usbip %s timed out after %ss (killed)", args[0] if args else "", timeout)
+        return subprocess.CompletedProcess(
+            [exe, *args], returncode=1, stdout="",
+            stderr=f"usbip {args[0] if args else ''} timed out after {int(timeout)}s",
+        )
 
 
 class _PtyBridge:
@@ -454,6 +467,8 @@ class DeviceAttacher:
         self._bridges: dict[str, _PtyBridge] = {}     # bus_id -> active bridge
         self._usb_helpers: dict[str, _USBHelperBridge] = {}  # bus_id -> USB helper
         self._vhci_install_attempted = False  # only trigger the UAC install once
+        self._attach_lock = threading.Lock()
+        self._attaching: set[str] = set()  # bus_ids with an attach in progress
         if OS == "Darwin":
             _USBHelperBridge.kill_stale_helpers()
 
@@ -471,6 +486,25 @@ class DeviceAttacher:
         if not forward_info:
             forward_info = {}
 
+        # Serialize per device: concurrent triggers (initial connect, mDNS
+        # discovery, poll loop) must never launch several usbip.exe attaches
+        # for the same device at once.
+        with self._attach_lock:
+            if bus_id in self._attaching:
+                log.info("Attach for %s already in progress — skipping duplicate", bus_id)
+                return AttachResult(
+                    AttachStatus.ERROR, message="Attach already in progress"
+                )
+            self._attaching.add(bus_id)
+        try:
+            return self._attach_locked(server_ip, bus_id, forward_info, usb_info)
+        finally:
+            with self._attach_lock:
+                self._attaching.discard(bus_id)
+
+    def _attach_locked(self, server_ip: str, bus_id: str,
+                       forward_info: dict,
+                       usb_info: dict | None) -> AttachResult:
         serial_info = forward_info.get("serial", {})
         ipp_info = forward_info.get("ipp", {})
         has_usbip = forward_info.get("usbip", False)
@@ -543,7 +577,10 @@ class DeviceAttacher:
         return list(self._attached.keys())
 
     def is_attaching(self) -> bool:
-        """True if a USB helper is currently waiting for user input (password dialog)."""
+        """True while an attach is running (any platform) or a macOS helper waits."""
+        with self._attach_lock:
+            if self._attaching:
+                return True
         return bool(_USBHelperBridge._starting_ports)
 
     def get_attach_info(self, bus_id: str) -> AttachResult | None:
