@@ -9,24 +9,21 @@ if defined ProgramW6432 (
   set "USBIP_DIR=%ProgramFiles%\USBip"
 )
 set "USBIP_EXE=%USBIP_DIR%\usbip.exe"
+set "USBIP_RES=%USBIP_DIR%\resources.dll"
 set "LOCK=%TEMP%\loki-usbip-install.lock"
 
-REM --- Single-instance guard: only one installer run at a time. ---
+REM --- Stale lock: ignore if no USBip-Setup is actually running. ---
+if exist "%LOCK%" (
+  tasklist /FI "IMAGENAME eq USBip-Setup.exe" | find /I "USBip-Setup.exe" >nul
+  if errorlevel 1 del /q "%LOCK%" 2>nul
+)
 if exist "%LOCK%" exit /b 0
 echo running> "%LOCK%"
 
-REM --- Skip if a USBip Setup/Uninstall is already running (deadlock risk). ---
-tasklist /FI "IMAGENAME eq USBip-Setup.exe" | find /I "USBip-Setup.exe" >nul
-if not errorlevel 1 (
-  del /q "%LOCK%" 2>nul
-  exit /b 0
-)
-
-REM --- Skip entirely if USBip is already installed (avoids an uninstall/
-REM     reinstall deadlock on the Inno Setup mutex). ---
-if exist "%USBIP_EXE%" goto :already_installed
-if exist "%USBIP_DIR%\unins000.exe" goto :already_installed
-if exist "%ProgramFiles%\USBip\usbip.exe" goto :already_installed
+REM --- Skip only a COMPLETE install (exe + resources.dll). ---
+REM A leftover usbip.exe without resources.dll is a broken half-uninstall
+REM (e.g. after a killed Setup) and must be repaired.
+if exist "%USBIP_EXE%" if exist "%USBIP_RES%" goto :already_installed
 
 if not exist "%SETUP%" (
   del /q "%LOCK%" 2>nul
@@ -37,14 +34,24 @@ if not exist "%SETUP%" (
 timeout /t 2 /nobreak >nul
 tasklist /FI "IMAGENAME eq LokiClient-Setup.exe" | find /I "LokiClient-Setup.exe" >nul
 if not errorlevel 1 goto wait_loki
-REM Also wait if a previous USBip Setup is still around.
-tasklist /FI "IMAGENAME eq USBip-Setup.exe" | find /I "USBip-Setup.exe" >nul
-if not errorlevel 1 goto wait_loki
+
+REM Broken leftover: uninstall quietly first so USBip-Setup does not
+REM start Uninstall + Install at the same time (Inno mutex deadlock).
+if exist "%USBIP_DIR%\unins000.exe" (
+  start /wait "" "%USBIP_DIR%\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+)
+:wait_unins
+timeout /t 1 /nobreak >nul
+tasklist /FI "IMAGENAME eq unins000.exe" | find /I "unins000.exe" >nul
+if not errorlevel 1 goto wait_unins
+tasklist /FI "IMAGENAME eq _unins.tmp" | find /I "_unins.tmp" >nul
+if not errorlevel 1 goto wait_unins
+timeout /t 2 /nobreak >nul
+
+if exist "%USBIP_EXE%" if exist "%USBIP_RES%" goto :already_installed
+
 REM Let Inno release its Setup mutex before starting the nested installer.
 timeout /t 5 /nobreak >nul
-
-REM Final race check: another process may have installed USBip while we waited.
-if exist "%USBIP_EXE%" goto :already_installed
 
 REM /TASKS="" skips USBip's optional desktop shortcut (we only want Loki on the desktop).
 "%SETUP%" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /TASKS="" /MERGETASKS="!desktopicon"

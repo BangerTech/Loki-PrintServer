@@ -57,6 +57,16 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
 
 
+def _usbip_win_complete(exe: str) -> bool:
+    """True only for a finished USBip install (exe + resources.dll).
+
+    A leftover usbip.exe without resources.dll is a broken half-uninstall
+    and must not be treated as 'already installed'.
+    """
+    folder = os.path.dirname(os.path.abspath(exe))
+    return os.path.isfile(os.path.join(folder, "resources.dll"))
+
+
 def _run_usbip_win(exe: str, args: list[str], timeout: float = 20.0) -> subprocess.CompletedProcess:
     """Run usbip.exe from its own folder so it finds attacher.exe and the .inf files.
 
@@ -686,26 +696,39 @@ class DeviceAttacher:
                 "(avoids uninstall/install deadlock)"
             )
             return
+        helper = self._find_usbip_helper_cmd()
         setup = self._find_usbip_setup()
-        if not setup:
+        if not helper and not setup:
             log.error("USBip-Setup.exe not found next to Loki-Client")
             return
-        folder = os.path.dirname(os.path.abspath(setup))
-        # Silent flags: no wizard; /TASKS="" avoids USBip desktop shortcut.
-        silent = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /TASKS=""'
         try:
             import ctypes
 
-            rc = ctypes.windll.shell32.ShellExecuteW(
-                None, "runas", setup, silent, folder, 1
-            )
+            if helper:
+                folder = os.path.dirname(os.path.abspath(helper))
+                rc = ctypes.windll.shell32.ShellExecuteW(
+                    None, "runas", helper, "", folder, 0
+                )
+            else:
+                folder = os.path.dirname(os.path.abspath(setup))
+                silent = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /TASKS=""'
+                rc = ctypes.windll.shell32.ShellExecuteW(
+                    None, "runas", setup, silent, folder, 1
+                )
             if rc <= 32:
-                log.error("USBip-Setup.exe could not start (rc=%s)", rc)
+                log.error("USBip install could not start (rc=%s)", rc)
                 return
         except Exception as e:
-            log.error("USBip-Setup.exe failed: %s", e)
+            log.error("USBip install failed: %s", e)
             return
         time.sleep(2)
+
+    def _find_usbip_helper_cmd(self) -> str | None:
+        setup = self._find_usbip_setup()
+        if not setup:
+            return None
+        cmd = os.path.join(os.path.dirname(os.path.abspath(setup)), "install-usbip-silent.cmd")
+        return cmd if os.path.isfile(cmd) else None
 
     def _find_usbip_setup(self) -> str | None:
         candidates: list[str] = []
@@ -776,7 +799,7 @@ class DeviceAttacher:
             if found:
                 candidates.append(found)
         for p in candidates:
-            if p and os.path.isfile(p):
+            if p and os.path.isfile(p) and _usbip_win_complete(p):
                 return p
         return None
 
