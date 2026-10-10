@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.5.1  
+**Version:** 1.5.2  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -559,6 +559,7 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-09 | 1.4.11 | **Fix: Inno Setup Compile `Identifier expected`:** `{...}`-Kommentare im `[Code]`-Block werden als Konstanten gelesen (`{sys}`). Jetzt `//`-Kommentare. `build_windows.bat` bricht bei ISCC-Fehler wirklich ab. |
 || 2026-09 | 1.4.12 | **Windows-Treiber:** usbip-win 0.3.5 durch **usbip-win2 0.9.7.7 (USBip)** ersetzt. Loki-Setup installiert USBip nach Finish **still** (kein zweites Wizard). Client sucht `C:\Program Files\USBip\usbip.exe` zuerst. **Dashboard-Log:** Live-Puffer statt leerer Datei; Windows-Client schickt Attach-Fehler per `POST /api/client-log`. macOS-Client-Pfad unverändert. |
 || 2026-09 | 1.4.13 | **Windows:** USBip legt kein Desktop-Icon mehr an (`/TASKS=""` + Löschen bekannter `.lnk`). Tray-Icon wird **grün** wenn mindestens ein Gerät wirklich attached ist (nicht nur Server erreichbar); Refresh nach Attach-Wechsel. |
+|| 2026-10 | 1.5.2 | **Fix: Windows-Vevor zeigte com0com-Dialog:** Server share bindet CH340 an socat und überspringt USB/IP. Windows hat kein com0com — früher kam der echte COM-Port per USB/IP. `attach-mode usbip` gilt jetzt auch für Serial-Plotter (socat stoppen, Kernel-Treiber lösen, usbip bind). Client schaltet Vevor/CH340 beim Attach um und stellt socat nach Detach wieder her. |
 || 2026-10 | 1.5.1 | **Fix: kaputte USBip-Reste blockieren Neuinstallation:** Nach einem abgebrochenen Uninstall blieb `usbip.exe` ohne `resources.dll` liegen. Das Silent-Skript und der Client werteten das als „schon installiert“ und übersprangen den Treiber (`can't load resources.dll`). Jetzt: vollständig nur bei `usbip.exe` + `resources.dll`; sonst still deinstallieren, dann neu installieren. Veraltete Lock-Datei wird ignoriert. |
 || 2026-10 | 1.5.0 | **Plot-Cut-API:** `GET /api/plotcut/devices` und `POST /api/plotcut/devices/{id}/job` nehmen fertige MGL-IIc/HP-GL-Rohbytes entgegen und schreiben sie unverändert (kein Generator). Stabile IDs (`mimaki-cg60sr`, `vevor`) per VID:PID-Config. Occupancy: USB/IP-attached, FineCut-Bridge-Client, socat-Remote und Job-Lock → 409, Gerät wird nicht weggenommen. Exportiert-aber-frei: temporärer usbip-unbind, danach wieder binden. Dashboard-Sektion mit Testauftrag. FineCut/USB/IP/socat unverändert. |
 || 2026-10 | 1.4.15 | **Fix: Installer-Deadlock bei bereits installiertem USBip:** Das Silent-Install-Script (`install-usbip-silent.cmd`) startete `USBip-Setup.exe` immer — bei vorhandener Installation lief dadurch eine Deinstallation + Neuinstallation parallel und blockierte sich am Inno-Setup-Mutex (zwei `USBip-Setup`-Fenster hängen „ewig"). Jetzt: (1) **Skip**, wenn `C:\Program Files\USBip\usbip.exe` bereits existiert (nur Desktop-Shortcuts aufräumen). (2) **Single-Instance-Lock** (`%TEMP%\loki-usbip-install.lock`) verhindert parallele Läufe. |

@@ -116,6 +116,16 @@ def _is_raw_usb(dev: DeviceInfo, fwd: dict | None) -> bool:
     return (dev.vendor_id or "").lower() == "0a50"
 
 
+def _wants_windows_usbip(dev: DeviceInfo, fwd: dict | None) -> bool:
+    """Windows cutting software needs a real USB/COM device via USB/IP."""
+    if _is_raw_usb(dev, fwd):
+        return True
+    cls = (dev.device_class or "").lower()
+    if "plotter" in cls or "cutter" in cls:
+        return True
+    return (dev.vendor_id or "").lower() in {"1a86", "0403", "067b", "10c4"}
+
+
 def _usb_info(dev: DeviceInfo) -> dict:
     """Extract USB identity fields for the virtual USB helper."""
     return {
@@ -789,7 +799,7 @@ class LokiPystrayApp:
 
     def _prepare_windows_attach(self, conn: ServerConnection,
                                 dev: DeviceInfo, fwd: dict | None) -> dict | None:
-        if OS != "Windows" or not _is_raw_usb(dev, fwd):
+        if OS != "Windows" or not _wants_windows_usbip(dev, fwd):
             return fwd
         if not self.attacher._find_usbip_win():
             return fwd
@@ -802,9 +812,10 @@ class LokiPystrayApp:
     def _restore_mac_bridge(self, conn: ServerConnection, dev: DeviceInfo):
         if OS != "Windows" or not conn.client:
             return
-        if (dev.vendor_id or "").lower() != "0a50":
-            return
-        conn.client.set_attach_mode(dev.bus_id, "bridge")
+        if (dev.vendor_id or "").lower() == "0a50":
+            conn.client.set_attach_mode(dev.bus_id, "bridge")
+        elif _wants_windows_usbip(dev, dev.forward_info):
+            conn.client.set_attach_mode(dev.bus_id, "serial")
 
     def _toggle_device(self, dev: DeviceInfo, conn: ServerConnection):
         if dev.bus_id in self.attacher.get_attached():

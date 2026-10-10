@@ -540,6 +540,7 @@ class DeviceAttacher:
                 (not result or result.status != AttachStatus.ATTACHED)
                 and has_serial
                 and not is_raw_bridge
+                and not self._find_usbip_win()
             ):
                 result = self._attach_serial_windows(server_ip, serial_info)
             if (not result or result.status != AttachStatus.ATTACHED) and has_ipp:

@@ -335,7 +335,11 @@ class ForwardingManager:
             "usbip": state.usbip_shared,
             "usbip_busid": state.usbip_busid,
             "serial": {
-                "available": state.serial_port is not None,
+                "available": bool(
+                    state.serial_port
+                    and state.serial_proc is not None
+                    and state.serial_proc.returncode is None
+                ),
                 "port": state.serial_port,
                 "device": state.serial_dev,
             },
@@ -359,14 +363,20 @@ class ForwardingManager:
             raise RuntimeError(
                 f"Plot-Cut-Auftrag läuft auf {bus_id} — Attach-Modus gerade nicht möglich"
             )
-        if not needs_raw_usb(state.vendor_id):
-            raise ValueError("attach-mode is only for raw-USB devices (e.g. Mimaki)")
-        if mode == "usbip":
-            await self._switch_to_usbip(state)
-        elif mode == "bridge":
-            await self._switch_to_bridge(state)
+        if needs_raw_usb(state.vendor_id):
+            if mode == "usbip":
+                await self._switch_to_usbip(state)
+            elif mode in ("bridge", "serial"):
+                await self._switch_to_bridge(state)
+            else:
+                raise ValueError(f"Unknown attach mode: {mode}")
         else:
-            raise ValueError(f"Unknown attach mode: {mode}")
+            if mode == "usbip":
+                await self._switch_serial_to_usbip(state)
+            elif mode in ("serial", "bridge"):
+                await self._switch_usbip_to_serial(state)
+            else:
+                raise ValueError(f"Unknown attach mode: {mode}")
         return self.get_forward_info(bus_id)
 
     async def _switch_to_usbip(self, state: ForwardState):
@@ -412,6 +422,64 @@ class ForwardingManager:
         state.serial_dev = f"usb-bridge:{state.vendor_id}:{state.product_id}"
         state.attach_mode = "bridge"
         logger.info(f"Switched {state.bus_id} back to USB bridge TCP:{port}")
+
+    async def _switch_serial_to_usbip(self, state: ForwardState):
+        """Stop socat/usbserial and export the device via USB/IP (Windows COM)."""
+        if state.usbip_shared:
+            state.attach_mode = "usbip"
+            return
+        await self._stop_serial_forward(state, keep_port=True)
+        await self._unbind_kernel_interfaces(state.bus_id)
+        await asyncio.sleep(0.8)
+        await self._share_usbip(state, state.bus_id)
+        if not state.usbip_shared:
+            logger.error(f"USB/IP bind failed for {state.bus_id}, restoring serial")
+            await self._switch_usbip_to_serial(state)
+            raise RuntimeError(f"usbip bind failed for {state.bus_id}")
+        state.usbip_busid = await self._resolve_usbip_busid(state.bus_id)
+        state.attach_mode = "usbip"
+        logger.info(f"Switched {state.bus_id} serial → USB/IP (busid={state.usbip_busid})")
+
+    async def _switch_usbip_to_serial(self, state: ForwardState):
+        """Give a CH340/serial plotter back to usbserial + socat (macOS)."""
+        if state.usbip_shared:
+            await self._unshare_usbip(state, state.bus_id)
+            state.usbip_busid = None
+            await asyncio.sleep(1.0)
+        if state.serial_proc and state.serial_proc.returncode is None:
+            state.attach_mode = "serial"
+            return
+        dev = self._find_serial_device(state.bus_id)
+        if not dev and state.vendor_id and state.product_id:
+            dev = await self._try_bind_usbserial(
+                state.bus_id, state.vendor_id, state.product_id
+            )
+        if not dev:
+            logger.warning(f"Could not restore serial for {state.bus_id}")
+            state.attach_mode = ""
+            return
+        await self._start_serial_forward(state, dev)
+        state.attach_mode = "serial"
+        logger.info(f"Switched {state.bus_id} USB/IP → serial TCP:{state.serial_port}")
+
+    async def _unbind_kernel_interfaces(self, bus_id: str) -> None:
+        """Detach kernel drivers (usbserial/ch341) so usbip-host can claim the device."""
+        import glob
+
+        sysfs_id = await self._resolve_usbip_busid(bus_id)
+        if not sysfs_id:
+            return
+        for intf in glob.glob(f"/sys/bus/usb/devices/{sysfs_id}/{sysfs_id}:*"):
+            driver = os.path.join(intf, "driver")
+            if not os.path.islink(driver):
+                continue
+            name = os.path.basename(intf)
+            unbind = os.path.join(os.path.realpath(driver), "unbind")
+            try:
+                Path(unbind).write_text(name)
+                logger.info(f"Unbound kernel driver from {name}")
+            except OSError as e:
+                logger.debug(f"unbind {name}: {e}")
 
     # ── USB/IP ────────────────────────────────────────────────────────────────
 
@@ -503,8 +571,9 @@ class ForwardingManager:
         if state.serial_proc and state.serial_proc.returncode is None:
             return  # already running
 
-        port = self._next_serial_port
-        self._next_serial_port += 1
+        port = state.serial_port or self._next_serial_port
+        if state.serial_port is None:
+            self._next_serial_port += 1
 
         # Detect baud rate (default 9600, plotters often use 9600 or 115200)
         baud = self._detect_baud(serial_dev)
@@ -535,16 +604,17 @@ class ForwardingManager:
         except Exception as e:
             logger.error(f"Serial forward start failed: {e}")
 
-    async def _stop_serial_forward(self, state: ForwardState):
+    async def _stop_serial_forward(self, state: ForwardState, *, keep_port: bool = False):
         if state.serial_proc and state.serial_proc.returncode is None:
             state.serial_proc.terminate()
             try:
                 await asyncio.wait_for(state.serial_proc.wait(), timeout=3)
             except TimeoutError:
                 state.serial_proc.kill()
+        saved_port = state.serial_port if keep_port else None
         state.serial_proc = None
-        state.serial_port = None
         state.serial_dev = None
+        state.serial_port = saved_port
 
     def _detect_baud(self, serial_dev: str) -> int:
         """Try to read current baud from stty, fallback to 9600."""
