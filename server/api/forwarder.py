@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -23,6 +24,26 @@ logger = logging.getLogger("loki-printserver.forwarder")
 
 # TCP port range for serial forwarding (one port per device)
 SERIAL_PORT_BASE = 7580
+# USB/IP export with no client for this long → give the device back to macOS.
+USBIP_IDLE_RESTORE_SECS = 20.0
+
+
+def _usbip_client_attached(usbip_busid: str | None) -> bool | None:
+    """True if a client holds the export, False if idle, None if unknown."""
+    if not usbip_busid:
+        return None
+    path = Path(f"/sys/bus/usb/devices/{usbip_busid}/usbip_status")
+    try:
+        if not path.is_file():
+            return None
+        status = int(path.read_text(encoding="utf-8").strip().split()[0])
+    except (OSError, ValueError):
+        return None
+    if status == 1:
+        return True
+    if status == 0:
+        return False
+    return None
 
 # Persistent state file — survives container restarts (stored in named volume)
 STATE_FILE = Path(os.getenv("LOKI_DATA_DIR", "/etc/loki-printserver")) / "shared_devices.json"
@@ -66,6 +87,7 @@ class ForwardingManager:
         self._next_serial_port = SERIAL_PORT_BASE
         self._usb_bridges: dict = {}
         self._plotcut_busy: set[str] = set()
+        self._usbip_idle_since: dict[str, float] = {}
 
     # ── Persistence ────────────────────────────────────────────────────────────
 
@@ -226,6 +248,43 @@ class ForwardingManager:
 
     def is_plotcut_busy(self, bus_id: str) -> bool:
         return bus_id in self._plotcut_busy
+
+    async def release_idle_usbip(self) -> None:
+        """Restore the macOS path after the Windows USB/IP client is gone.
+
+        A shutdown does not call detach. Once the export has no client for
+        USBIP_IDLE_RESTORE_SECS, Mimaki goes back to the USB bridge and
+        CH340/Vevor back to socat.
+        """
+        from .usb_bridge import needs_raw_usb
+
+        now = time.monotonic()
+        for state in list(self._states.values()):
+            if not state.usbip_shared or state.attach_mode != "usbip":
+                self._usbip_idle_since.pop(state.bus_id, None)
+                continue
+            if self.is_plotcut_busy(state.bus_id):
+                continue
+            attached = _usbip_client_attached(state.usbip_busid)
+            if attached is True:
+                self._usbip_idle_since.pop(state.bus_id, None)
+                continue
+            if attached is None:
+                continue
+            since = self._usbip_idle_since.setdefault(state.bus_id, now)
+            if now - since < USBIP_IDLE_RESTORE_SECS:
+                continue
+            self._usbip_idle_since.pop(state.bus_id, None)
+            logger.info(
+                "USB/IP client gone for %s — restoring macOS path", state.bus_id
+            )
+            try:
+                if needs_raw_usb(state.vendor_id):
+                    await self._switch_to_bridge(state)
+                else:
+                    await self._switch_usbip_to_serial(state)
+            except Exception as e:
+                logger.warning("Could not restore macOS path for %s: %s", state.bus_id, e)
 
     def find_state(self, bus_id: str, vendor_id: str = "",
                    product_id: str = "") -> ForwardState | None:
@@ -394,6 +453,7 @@ class ForwardingManager:
             raise RuntimeError(f"usbip bind failed for {state.bus_id}")
         state.usbip_busid = await self._resolve_usbip_busid(state.bus_id)
         state.attach_mode = "usbip"
+        self._usbip_idle_since.pop(state.bus_id, None)
         logger.info(f"Switched {state.bus_id} to USB/IP (busid={state.usbip_busid})")
 
     async def _switch_to_bridge(self, state: ForwardState):
@@ -438,6 +498,7 @@ class ForwardingManager:
             raise RuntimeError(f"usbip bind failed for {state.bus_id}")
         state.usbip_busid = await self._resolve_usbip_busid(state.bus_id)
         state.attach_mode = "usbip"
+        self._usbip_idle_since.pop(state.bus_id, None)
         logger.info(f"Switched {state.bus_id} serial → USB/IP (busid={state.usbip_busid})")
 
     async def _switch_usbip_to_serial(self, state: ForwardState):

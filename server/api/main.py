@@ -139,6 +139,16 @@ async def _auto_restore_devices():
             logger.warning(f"Auto-restore failed for {entry.bus_id}: {e}")
 
 
+async def _release_idle_usbip_loop():
+    """Give plotters back to macOS shortly after the Windows USB/IP client leaves."""
+    while True:
+        await asyncio.sleep(5)
+        try:
+            await forwarder.release_idle_usbip()
+        except Exception as e:
+            logger.warning("idle USB/IP release failed: %s", e)
+
+
 async def _auto_share_all():
     """Share every detected USB device (AUTO_SHARE_ALL=true mode)."""
     await asyncio.sleep(2)
@@ -176,7 +186,10 @@ async def lifespan(app: FastAPI):
     else:
         asyncio.create_task(_auto_restore_devices())
 
+    idle_task = asyncio.create_task(_release_idle_usbip_loop())
+
     yield
+    idle_task.cancel()
     logger.info("Shutting down Loki-PrintServer...")
     # Stop forwarding processes but keep saved state for auto-restore
     for state in forwarder.get_all_shared():
