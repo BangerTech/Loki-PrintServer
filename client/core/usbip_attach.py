@@ -621,22 +621,21 @@ class DeviceAttacher:
                 ),
             )
         if not self._vhci_driver_loaded(exe):
-            log.warning("VHCI driver not loaded — launching USBip installer")
-            self._ensure_vhci_driver(exe)
-            exe = self._find_usbip_win() or exe
-            if not self._vhci_driver_loaded(exe):
-                return AttachResult(
-                    AttachStatus.ERROR,
-                    message=(
-                        "USB/IP driver is not loaded.\n\n"
-                        "1. Run USBip-Setup.exe (Loki-Client\\usbip-win) as Administrator\n"
-                        "2. Restart Windows once\n"
-                        "3. If it still fails: Windows Security → Device security → "
-                        "Core isolation → Memory integrity OFF, then reboot.\n\n"
-                        "Do not use the old usbip-win 0.3.5 stack — it does not load "
-                        "on current Windows 11."
-                    ),
-                )
+            log.warning("VHCI driver not loaded (USBip already present — not re-running Setup)")
+            # Never re-launch USBip-Setup here: Inno uninstall+reinstall deadlocks
+            # (Uninstall + Setup windows stuck forever). Reboot / Memory Integrity.
+            return AttachResult(
+                AttachStatus.ERROR,
+                message=(
+                    "USB/IP is installed but the VHCI driver is not loaded.\n\n"
+                    "1. Restart Windows once (required after USBip install)\n"
+                    "2. If it still fails: Windows Security → Device security → "
+                    "Core isolation → Memory integrity OFF, then reboot\n"
+                    "3. Only if still broken: uninstall USBip in Apps & Features, "
+                    "reboot, then reinstall Loki-Client (driver installs silently)\n\n"
+                    "Do not run USBip-Setup.exe again while USBip is already installed."
+                ),
+            )
 
         log.info("usbip-win attach %s -r %s -b %s (cwd=%s)",
                  exe, server_ip, bus_id, os.path.dirname(exe))
@@ -650,7 +649,16 @@ class DeviceAttacher:
         err = (r.stderr or r.stdout or "").strip() or "usbip attach failed"
         log.error("usbip-win attach failed: %s", err)
         if "not loaded" in err.lower():
-            self._vhci_install_attempted = False  # allow another install attempt
+            return AttachResult(
+                AttachStatus.ERROR,
+                message=(
+                    "USB/IP driver is not loaded.\n\n"
+                    "Restart Windows once. If it still fails: Windows Security → "
+                    "Device security → Core isolation → Memory integrity OFF, "
+                    "then reboot.\n\n"
+                    "Do not re-run USBip-Setup while USBip is already installed."
+                ),
+            )
         return AttachResult(AttachStatus.ERROR, message=err)
 
     def _vhci_driver_loaded(self, exe: str) -> bool:
@@ -664,20 +672,32 @@ class DeviceAttacher:
         return "not loaded" not in combined
 
     def _ensure_vhci_driver(self, exe_or_setup: str) -> None:
-        """Launch the official USBip installer once (UAC). Do not run cezanne 'usbip install'."""
+        """Install USBip once via silent Setup (UAC). Never re-run if already installed.
+
+        Re-launching USBip-Setup while USBip is present starts Inno's uninstall
+        and install at the same time; both hang on the Setup mutex forever.
+        """
         if self._vhci_install_attempted:
             return
         self._vhci_install_attempted = True
+        if self._find_usbip_win():
+            log.warning(
+                "USBip already installed — skip Setup re-launch "
+                "(avoids uninstall/install deadlock)"
+            )
+            return
         setup = self._find_usbip_setup()
         if not setup:
             log.error("USBip-Setup.exe not found next to Loki-Client")
             return
         folder = os.path.dirname(os.path.abspath(setup))
+        # Silent flags: no wizard; /TASKS="" avoids USBip desktop shortcut.
+        silent = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /TASKS=""'
         try:
             import ctypes
 
             rc = ctypes.windll.shell32.ShellExecuteW(
-                None, "runas", setup, "", folder, 1
+                None, "runas", setup, silent, folder, 1
             )
             if rc <= 32:
                 log.error("USBip-Setup.exe could not start (rc=%s)", rc)
