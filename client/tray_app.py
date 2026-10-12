@@ -137,6 +137,104 @@ def _usb_info(dev: DeviceInfo) -> dict:
     }
 
 
+def _status_dot_bitmap(rgb: tuple[int, int, int]):
+    """16×16 green/red circle as an HBITMAP. Windows tray menus draw emoji in grey."""
+    import ctypes
+    from ctypes import wintypes
+
+    gdi32 = ctypes.windll.gdi32
+    user32 = ctypes.windll.user32
+    size = 16
+
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [
+            ("biSize", wintypes.DWORD),
+            ("biWidth", ctypes.c_long),
+            ("biHeight", ctypes.c_long),
+            ("biPlanes", wintypes.WORD),
+            ("biBitCount", wintypes.WORD),
+            ("biCompression", wintypes.DWORD),
+            ("biSizeImage", wintypes.DWORD),
+            ("biXPelsPerMeter", ctypes.c_long),
+            ("biYPelsPerMeter", ctypes.c_long),
+            ("biClrUsed", wintypes.DWORD),
+            ("biClrImportant", wintypes.DWORD),
+        ]
+
+    class BITMAPINFO(ctypes.Structure):
+        _fields_ = [
+            ("bmiHeader", BITMAPINFOHEADER),
+            ("bmiColors", wintypes.DWORD * 3),
+        ]
+
+    bmi = BITMAPINFO()
+    bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+    bmi.bmiHeader.biWidth = size
+    bmi.bmiHeader.biHeight = -size
+    bmi.bmiHeader.biPlanes = 1
+    bmi.bmiHeader.biBitCount = 32
+    bmi.bmiHeader.biCompression = 0
+
+    bits = ctypes.c_void_p()
+    gdi32.CreateDIBSection.argtypes = [
+        wintypes.HDC, ctypes.POINTER(BITMAPINFO), wintypes.UINT,
+        ctypes.POINTER(ctypes.c_void_p), wintypes.HANDLE, wintypes.DWORD,
+    ]
+    gdi32.CreateDIBSection.restype = wintypes.HBITMAP
+    hdc = user32.GetDC(None)
+    hbmp = gdi32.CreateDIBSection(hdc, ctypes.byref(bmi), 0, ctypes.byref(bits), None, 0)
+    user32.ReleaseDC(None, hdc)
+    if not hbmp or not bits.value:
+        return None
+
+    red, green, blue = rgb
+    buf = (ctypes.c_ubyte * (size * size * 4)).from_address(bits.value)
+    cx = cy = (size - 1) / 2
+    radius = 5.2
+    for y in range(size):
+        for x in range(size):
+            dist = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+            if dist <= radius - 0.7:
+                alpha = 255
+            elif dist >= radius + 0.7:
+                alpha = 0
+            else:
+                alpha = int(255 * (radius + 0.7 - dist) / 1.4)
+            i = (y * size + x) * 4
+            buf[i] = blue * alpha // 255
+            buf[i + 1] = green * alpha // 255
+            buf[i + 2] = red * alpha // 255
+            buf[i + 3] = alpha
+    return hbmp
+
+
+def _install_menu_status_dots(icon) -> None:
+    """Draw a real coloured dot on Windows menu rows that set status_color."""
+    if getattr(icon, "_loki_status_dots", False):
+        return
+    icon._loki_status_dots = True
+    icon._loki_dot_bitmaps = {}
+    original = icon._create_menu_item
+
+    def _create_menu_item(descriptor, callbacks):
+        info = original(descriptor, callbacks)
+        color = getattr(descriptor, "status_color", None)
+        if not color or info is None:
+            return info
+        hbmp = icon._loki_dot_bitmaps.get(color)
+        if hbmp is None:
+            hbmp = _status_dot_bitmap(color)
+            if hbmp:
+                icon._loki_dot_bitmaps[color] = hbmp
+        if not hbmp:
+            return info
+        info.fMask |= 0x00000080  # MIIM_BITMAP
+        info.hbmpItem = hbmp
+        return info
+
+    icon._create_menu_item = _create_menu_item
+
+
 def make_tray_icon(connected: bool = False, size: int = 64) -> Image.Image:
     """Load the real logo icon, fall back to generated if not found."""
     from PIL import Image, ImageDraw
@@ -653,6 +751,8 @@ class LokiPystrayApp:
             "Loki-PrintServer",
             menu=self._build_menu(),
         )
+        if OS == "Windows":
+            _install_menu_status_dots(self._icon)
         threading.Thread(target=self._poll_loop, daemon=True).start()
         self._icon.run()
 
@@ -753,8 +853,7 @@ class LokiPystrayApp:
             items.append(pystray.MenuItem("No servers configured", None, enabled=False))
         else:
             for host, conn in self.connections.items():
-                status = "🟢" if conn.connected else "🔴"
-                label = f"{status} {conn.entry.name} ({host})"
+                label = f"{conn.entry.name} ({host})"
 
                 sub_items = []
                 if conn.connected and conn.devices:
@@ -781,7 +880,9 @@ class LokiPystrayApp:
                         lambda h=host, p=conn.entry.port: webbrowser.open(f"http://{h}:{p}")
                     ),
                 ))
-                items.append(pystray.MenuItem(label, pystray.Menu(*sub_items)))
+                server_item = pystray.MenuItem(label, pystray.Menu(*sub_items))
+                server_item.status_color = (46, 204, 113) if conn.connected else (220, 60, 60)
+                items.append(server_item)
 
         items.append(pystray.Menu.SEPARATOR)
         items.append(pystray.MenuItem("Add server…", self._add_server_dialog))
@@ -817,7 +918,27 @@ class LokiPystrayApp:
         elif _wants_windows_usbip(dev, dev.forward_info):
             conn.client.set_attach_mode(dev.bus_id, "serial")
 
+    def _current_device(self, conn: ServerConnection, dev: DeviceInfo) -> DeviceInfo:
+        """Use the live bus_id. USB re-enumeration changes it after the plotter is powered on."""
+        conn.refresh()
+        vid = (dev.vendor_id or "").lower()
+        pid = (dev.product_id or "").lower()
+        for current in conn.devices:
+            if current.is_infrastructure:
+                continue
+            if current.bus_id == dev.bus_id:
+                return current
+        for current in conn.devices:
+            if current.is_infrastructure:
+                continue
+            if (current.vendor_id or "").lower() == vid and (current.product_id or "").lower() == pid:
+                if current.bus_id != dev.bus_id:
+                    log.info("USB re-enumerated %s → %s", dev.bus_id, current.bus_id)
+                return current
+        return dev
+
     def _toggle_device(self, dev: DeviceInfo, conn: ServerConnection):
+        dev = self._current_device(conn, dev)
         if dev.bus_id in self.attacher.get_attached():
             info = self.attacher.get_attach_info(dev.bus_id)
             self.attacher.detach(dev.bus_id)

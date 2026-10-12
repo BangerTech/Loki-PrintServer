@@ -5,7 +5,7 @@
 **Loki-PrintServer** teilt USB-Geräte (Schneideplotter, Drucker, Scanner) vom Raspberry Pi über das Netzwerk. Clients unter Windows, macOS und Linux sehen das Gerät als lokal angeschlossen.
 
 **GitHub:** https://github.com/BangerTech/Loki-PrintServer  
-**Version:** 1.5.3  
+**Version:** 1.5.4  
 **Lizenz:** MIT — © BangerTECH
 
 ---
@@ -559,6 +559,7 @@ Viele Ruff-Hinweise sind mit `ruff check --fix` automatisch behebbar.
 || 2026-09 | 1.4.11 | **Fix: Inno Setup Compile `Identifier expected`:** `{...}`-Kommentare im `[Code]`-Block werden als Konstanten gelesen (`{sys}`). Jetzt `//`-Kommentare. `build_windows.bat` bricht bei ISCC-Fehler wirklich ab. |
 || 2026-09 | 1.4.12 | **Windows-Treiber:** usbip-win 0.3.5 durch **usbip-win2 0.9.7.7 (USBip)** ersetzt. Loki-Setup installiert USBip nach Finish **still** (kein zweites Wizard). Client sucht `C:\Program Files\USBip\usbip.exe` zuerst. **Dashboard-Log:** Live-Puffer statt leerer Datei; Windows-Client schickt Attach-Fehler per `POST /api/client-log`. macOS-Client-Pfad unverändert. |
 || 2026-09 | 1.4.13 | **Windows:** USBip legt kein Desktop-Icon mehr an (`/TASKS=""` + Löschen bekannter `.lnk`). Tray-Icon wird **grün** wenn mindestens ein Gerät wirklich attached ist (nicht nur Server erreichbar); Refresh nach Attach-Wechsel. |
+|| 2026-10 | 1.5.4 | **Fix: Windows-Tray hängt an usbip attach:** `usbip attach` bleibt bei einer bestehenden Verbindung absichtlich laufen. Der Client hat darauf ohne Ende gewartet, die Tray-App hat sich nicht mehr aktualisiert, und ein Klick nach dem Einschalten hat noch die alte `bus_id` benutzt. Eine laufende `attach`-Session gilt nur dann als verbunden, wenn Windows das Gerät auch wirklich anzeigt; sonst wird sie beendet. Hängt die Session im Treiber fest (Windows beendet sie nicht), hilft ein Neustart von Windows. Eine echte Session wird nur beim Trennen beendet. `port`/`detach` nutzen `taskkill /F /T` mit begrenztem Warten. Der Klick löst die aktuelle `bus_id` per VID:PID neu auf. **Tray-Menü:** Der Punkt neben der Server-Adresse ist auf Windows ein echtes grünes (online) bzw. rotes (offline) Bitmap. Das Emoji wurde dort grau gezeichnet. Der Punkt am Loki-Symbol bleibt die Anzeige für einen verbundenen Plotter. |
 || 2026-10 | 1.5.3 | **Automatisch zurück zum Mac:** Wenn der Windows-USB/IP-Client weg ist (auch nach Herunterfahren, ohne Detach), stellt der Pi nach 20 s den Mac-Weg wieder her: Vevor → socat, Mimaki → USB-Bridge. Der Mac-Client muss dafür nichts umschalten. |
 || 2026-10 | 1.5.2 | **Fix: Windows-Vevor zeigte com0com-Dialog:** Server share bindet CH340 an socat und überspringt USB/IP. Windows hat kein com0com — früher kam der echte COM-Port per USB/IP. `attach-mode usbip` gilt jetzt auch für Serial-Plotter (socat stoppen, Kernel-Treiber lösen, usbip bind). Client schaltet Vevor/CH340 beim Attach um und stellt socat nach Detach wieder her. |
 || 2026-10 | 1.5.1 | **Fix: kaputte USBip-Reste blockieren Neuinstallation:** Nach einem abgebrochenen Uninstall blieb `usbip.exe` ohne `resources.dll` liegen. Das Silent-Skript und der Client werteten das als „schon installiert“ und übersprangen den Treiber (`can't load resources.dll`). Jetzt: vollständig nur bei `usbip.exe` + `resources.dll`; sonst still deinstallieren, dann neu installieren. Veraltete Lock-Datei wird ignoriert. |

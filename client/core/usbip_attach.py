@@ -67,33 +67,95 @@ def _usbip_win_complete(exe: str) -> bool:
     return os.path.isfile(os.path.join(folder, "resources.dll"))
 
 
-def _run_usbip_win(exe: str, args: list[str], timeout: float = 20.0) -> subprocess.CompletedProcess:
-    """Run usbip.exe from its own folder so it finds attacher.exe and the .inf files.
+def _kill_process_tree(pid: int) -> None:
+    """Force-kill a process and its children. TerminateProcess alone can leave usbip alive."""
+    if not pid:
+        return
+    if OS == "Windows":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except Exception as e:
+            log.debug("taskkill %s failed: %s", pid, e)
+        return
+    try:
+        os.kill(pid, 9)
+    except OSError:
+        pass
 
-    A timeout is mandatory: a hung `usbip attach` (e.g. device not actually
-    exported on the server) would otherwise block the calling thread forever
-    and pile up zombie usbip.exe processes.
-    """
+
+def _popen_usbip_win(exe: str, args: list[str]) -> subprocess.Popen:
+    """Start usbip.exe in its own folder so it finds attacher.exe and the .inf files."""
     folder = os.path.dirname(os.path.abspath(exe))
     env = os.environ.copy()
     env["PATH"] = folder + os.pathsep + env.get("PATH", "")
+    return subprocess.Popen(
+        [exe, *args],
+        cwd=folder,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+
+
+def _vid_present(vendor_id: str) -> bool:
+    """True when Windows has enumerated a present USB device with this VID."""
+    vid = re.sub(r"[^0-9A-Fa-f]", "", vendor_id or "").upper()
+    if len(vid) < 4:
+        return False
+    vid = vid[-4:]
+    script = (
+        "if (Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | "
+        f"Where-Object {{ $_.InstanceId -match 'VID_{vid}' }}) {{ 'yes' }}"
+    )
     try:
-        return subprocess.run(
-            [exe, *args],
-            cwd=folder,
-            env=env,
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
             capture_output=True,
             text=True,
-            timeout=timeout,
-            # Suppress the console window — critical for a system-tray app
+            timeout=20,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
+    except Exception as e:
+        log.debug("PnP check for %s failed: %s", vid, e)
+        return False
+    return "yes" in (r.stdout or "").lower()
+
+
+def _run_usbip_win(exe: str, args: list[str], timeout: float = 20.0) -> subprocess.CompletedProcess:
+    """Run a usbip command that is expected to exit (`port`, `detach`).
+
+    A command that ignores TerminateProcess must not block the tray thread.
+    Python's subprocess timeout calls communicate() again after kill(); that
+    second wait has its own deadline here.
+    """
+    proc = _popen_usbip_win(exe, args)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        log.error("usbip %s timed out after %ss (killed)", args[0] if args else "", timeout)
+        log.error("usbip %s timed out after %ss (killing tree)", args[0] if args else "", timeout)
+        _kill_process_tree(proc.pid)
+        try:
+            stdout, stderr = proc.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = "", ""
+        err = (stderr or "").strip() or f"usbip {args[0] if args else ''} timed out after {int(timeout)}s"
         return subprocess.CompletedProcess(
-            [exe, *args], returncode=1, stdout="",
-            stderr=f"usbip {args[0] if args else ''} timed out after {int(timeout)}s",
+            [exe, *args], returncode=1, stdout=stdout or "", stderr=err,
         )
+    return subprocess.CompletedProcess(
+        [exe, *args],
+        returncode=proc.returncode if proc.returncode is not None else 1,
+        stdout=stdout or "",
+        stderr=stderr or "",
+    )
 
 
 class _PtyBridge:
@@ -479,6 +541,9 @@ class DeviceAttacher:
         self._vhci_install_attempted = False  # only trigger the UAC install once
         self._attach_lock = threading.Lock()
         self._attaching: set[str] = set()  # bus_ids with an attach in progress
+        # usbip-win `attach` stays running for the whole session. Keyed by the
+        # server bus_id that detach() receives, not the usbip bus id.
+        self._usbip_procs: dict[str, subprocess.Popen] = {}
         if OS == "Darwin":
             _USBHelperBridge.kill_stale_helpers()
 
@@ -535,7 +600,10 @@ class DeviceAttacher:
             is_raw_bridge = str(serial_info.get("device") or "").startswith("usb-bridge:")
             usbip_busid = forward_info.get("usbip_busid") or bus_id
             if has_usbip:
-                result = self._attach_usbip_windows(server_ip, usbip_busid)
+                vid = str((usb_info or {}).get("vendor_id") or "")
+                result = self._attach_usbip_windows(
+                    server_ip, usbip_busid, track_key=bus_id, vendor_id=vid,
+                )
             if (
                 (not result or result.status != AttachStatus.ATTACHED)
                 and has_serial
@@ -614,7 +682,9 @@ class DeviceAttacher:
                                 "USB device attached via USB/IP", local)
         return AttachResult(AttachStatus.ERROR, message=r.stderr.strip() or r.stdout.strip())
 
-    def _attach_usbip_windows(self, server_ip: str, bus_id: str) -> AttachResult:
+    def _attach_usbip_windows(self, server_ip: str, bus_id: str,
+                              track_key: str | None = None,
+                              vendor_id: str = "") -> AttachResult:
         exe = self._find_usbip_win()
         if not exe:
             setup = self._find_usbip_setup()
@@ -648,16 +718,67 @@ class DeviceAttacher:
                 ),
             )
 
-        log.info("usbip-win attach %s -r %s -b %s (cwd=%s)",
-                 exe, server_ip, bus_id, os.path.dirname(exe))
-        r = _run_usbip_win(exe, ["attach", "-r", server_ip, "-b", bus_id])
-        if r.returncode == 0:
+        key = track_key or bus_id
+        running = self._usbip_procs.get(key)
+        if running is not None and running.poll() is None:
+            log.info("usbip attach for %s already running (pid %s)", key, running.pid)
             return AttachResult(
                 AttachStatus.ATTACHED, AttachMethod.USBIP,
                 "USB device attached via USB/IP.\n"
                 "Windows should now show the plotter as a local USB device.",
             )
-        err = (r.stderr or r.stdout or "").strip() or "usbip attach failed"
+        self._usbip_procs.pop(key, None)
+
+        log.info("usbip-win attach %s -r %s -b %s (cwd=%s)",
+                 exe, server_ip, bus_id, os.path.dirname(exe))
+        # usbip-win keeps `attach` alive for the session. Exiting is a failure
+        # (or a rare immediate success). Staying up is the connected state.
+        proc = _popen_usbip_win(exe, ["attach", "-r", server_ip, "-b", bus_id])
+        try:
+            stdout, stderr = proc.communicate(timeout=8)
+        except subprocess.TimeoutExpired:
+            # A live `usbip attach` is only a connection once Windows enumerates
+            # the device. A process stuck in the driver never creates one.
+            present = (not vendor_id) or _vid_present(vendor_id)
+            if vendor_id and not present:
+                time.sleep(3)
+                present = _vid_present(vendor_id)
+            if present:
+                self._usbip_procs[key] = proc
+                threading.Thread(
+                    target=self._drain_usbip, args=(proc,), daemon=True,
+                ).start()
+                log.info("usbip attach for %s staying up (pid %s) — connected", key, proc.pid)
+                return AttachResult(
+                    AttachStatus.ATTACHED, AttachMethod.USBIP,
+                    "USB device attached via USB/IP.\n"
+                    "Windows should now show the plotter as a local USB device.",
+                )
+            log.error(
+                "usbip attach for %s (pid %s) stayed up but VID %s is not present",
+                key, proc.pid, vendor_id,
+            )
+            _kill_process_tree(proc.pid)
+            try:
+                proc.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass
+            return AttachResult(
+                AttachStatus.ERROR,
+                message=(
+                    "USB/IP did not connect the plotter.\n\n"
+                    "An older usbip session is stuck inside the driver and "
+                    "Windows will not end it. Restart Windows once, then open "
+                    "Loki again and connect the plotter."
+                ),
+            )
+        if proc.returncode == 0:
+            return AttachResult(
+                AttachStatus.ATTACHED, AttachMethod.USBIP,
+                "USB device attached via USB/IP.\n"
+                "Windows should now show the plotter as a local USB device.",
+            )
+        err = (stderr or stdout or "").strip() or "usbip attach failed"
         log.error("usbip-win attach failed: %s", err)
         if "not loaded" in err.lower():
             return AttachResult(
@@ -671,6 +792,13 @@ class DeviceAttacher:
                 ),
             )
         return AttachResult(AttachStatus.ERROR, message=err)
+
+    def _drain_usbip(self, proc: subprocess.Popen) -> None:
+        """Read leftover output so a long-lived usbip attach cannot block on a full pipe."""
+        try:
+            proc.communicate()
+        except Exception:
+            pass
 
     def _vhci_driver_loaded(self, exe: str) -> bool:
         """True if the usbip-win VHCI driver is loaded (checked via `usbip port`)."""
@@ -770,6 +898,10 @@ class DeviceAttacher:
                     if m:
                         _run(["usbip", "detach", "-p", m.group(1)])
         elif OS == "Windows":
+            proc = self._usbip_procs.pop(bus_id, None)
+            if proc is not None and proc.poll() is None:
+                log.info("stopping usbip attach pid %s for %s", proc.pid, bus_id)
+                _kill_process_tree(proc.pid)
             exe = self._find_usbip_win()
             if exe:
                 _run_usbip_win(exe, ["detach", "-b", bus_id])
