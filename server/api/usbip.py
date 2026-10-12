@@ -188,7 +188,7 @@ class USBIPManager:
             # Any completed reply means the daemon is alive. "no exportable
             # devices" is a healthy empty answer, not a hang.
             return True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("usbipd health probe timed out after %.0fs", timeout)
             if proc is not None:
                 try:
