@@ -40,6 +40,8 @@ class LokiConfig:
     first_launch: bool = True
     start_at_login: bool = False
     show_notifications: bool = True
+    # VID:PID keys the user attached by clicking. Auto-attach only these.
+    auto_attach: list[str] = field(default_factory=list)
 
     def add_server(self, host: str, port: int = 7576, name: str = "") -> ServerEntry:
         entry = ServerEntry(host=host, port=port, name=name or host)
@@ -59,8 +61,31 @@ class LokiConfig:
             "first_launch": self.first_launch,
             "start_at_login": self.start_at_login,
             "show_notifications": self.show_notifications,
+            "auto_attach": list(self.auto_attach),
         }
         CONFIG_FILE.write_text(json.dumps(data, indent=2))
+
+    @staticmethod
+    def device_key(vendor_id: str | None, product_id: str | None) -> str:
+        return f"{(vendor_id or '').lower()}:{(product_id or '').lower()}"
+
+    def wants_auto_attach(self, vendor_id: str | None, product_id: str | None) -> bool:
+        key = self.device_key(vendor_id, product_id)
+        return bool(key != ":") and key in self.auto_attach
+
+    def remember_attach(self, vendor_id: str | None, product_id: str | None) -> None:
+        key = self.device_key(vendor_id, product_id)
+        if not key or key == ":" or key in self.auto_attach:
+            return
+        self.auto_attach.append(key)
+        self.save()
+
+    def forget_attach(self, vendor_id: str | None, product_id: str | None) -> None:
+        key = self.device_key(vendor_id, product_id)
+        if key not in self.auto_attach:
+            return
+        self.auto_attach = [k for k in self.auto_attach if k != key]
+        self.save()
 
     @classmethod
     def load(cls) -> "LokiConfig":
@@ -69,11 +94,14 @@ class LokiConfig:
         try:
             data = json.loads(CONFIG_FILE.read_text())
             servers = [ServerEntry(**s) for s in data.get("servers", [])]
+            raw_keys = data.get("auto_attach") or []
+            auto_attach = [str(k).lower() for k in raw_keys if k]
             return cls(
                 servers=servers,
                 first_launch=data.get("first_launch", True),
                 start_at_login=data.get("start_at_login", False),
                 show_notifications=data.get("show_notifications", True),
+                auto_attach=auto_attach,
             )
         except Exception:
             return cls()

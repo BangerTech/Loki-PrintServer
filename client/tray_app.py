@@ -382,7 +382,7 @@ if HAS_RUMPS:
         # ── Connection ────────────────────────────────────────────────────────
 
         def _auto_attach_shared(self, conn: ServerConnection):
-            """Automatically attach every device the server has already shared."""
+            """Re-attach only devices the user previously connected by clicking."""
             if self.attacher.is_attaching():
                 log.debug("Attach already in progress (password dialog?), skipping auto-attach")
                 return
@@ -391,6 +391,8 @@ if HAS_RUMPS:
                 if dev.is_infrastructure or dev.bus_id in already:
                     continue
                 if not dev.is_shared:
+                    continue
+                if not self.config.wants_auto_attach(dev.vendor_id, dev.product_id):
                     continue
                 log.info("Auto-attaching shared device %s (bus=%s)",
                          dev.display_name, dev.bus_id)
@@ -618,6 +620,7 @@ if HAS_RUMPS:
             log.info("Toggle device %s (bus=%s)", dev.display_name, dev.bus_id)
             if dev.bus_id in self.attacher.get_attached():
                 self.attacher.detach(dev.bus_id)
+                self.config.forget_attach(dev.vendor_id, dev.product_id)
                 log.info("Detached %s", dev.bus_id)
                 rumps.notification("Detached", dev.display_name, "")
             else:
@@ -638,6 +641,7 @@ if HAS_RUMPS:
                 log.info("Attach result: status=%s msg=%s dev=%s",
                          result.status, result.message, result.local_device)
                 if result.status == AttachStatus.ATTACHED:
+                    self.config.remember_attach(dev.vendor_id, dev.product_id)
                     msg = dev.display_name
                     if result.local_device:
                         msg += f" → {result.local_device}"
@@ -777,6 +781,8 @@ class LokiPystrayApp:
         now = time.monotonic()
         for dev in conn.devices:
             if dev.is_infrastructure or dev.bus_id in already or not dev.is_shared:
+                continue
+            if not self.config.wants_auto_attach(dev.vendor_id, dev.product_id):
                 continue
             # Throttle retries: don't spawn usbip.exe more often than once per minute.
             # Without this, every 5-s poll would flash a console window on failure.
@@ -942,6 +948,7 @@ class LokiPystrayApp:
         if dev.bus_id in self.attacher.get_attached():
             info = self.attacher.get_attach_info(dev.bus_id)
             self.attacher.detach(dev.bus_id)
+            self.config.forget_attach(dev.vendor_id, dev.product_id)
             self._attach_warned.discard(dev.bus_id)
             self._attach_failed_at.pop(dev.bus_id, None)
             if info and info.method == AttachMethod.USBIP:
@@ -959,7 +966,9 @@ class LokiPystrayApp:
                                           forward_info=fwd_info,
                                           usb_info=_usb_info(dev))
             self._report_attach(conn, dev, result)
-            if result.status != AttachStatus.ATTACHED:
+            if result.status == AttachStatus.ATTACHED:
+                self.config.remember_attach(dev.vendor_id, dev.product_id)
+            else:
                 _notify("Loki-Client — Plotter not attached", result.message)
         conn.refresh()
         self._refresh_icon()

@@ -149,6 +149,16 @@ async def _release_idle_usbip_loop():
             logger.warning("idle USB/IP release failed: %s", e)
 
 
+async def _usbipd_watchdog_loop():
+    """Restart usbipd if it wedges so clients never hang on attach/list."""
+    while True:
+        await asyncio.sleep(20)
+        try:
+            await usbip_manager.ensure_daemon_healthy()
+        except Exception as e:
+            logger.warning("usbipd watchdog failed: %s", e)
+
+
 async def _auto_share_all():
     """Share every detected USB device (AUTO_SHARE_ALL=true mode)."""
     await asyncio.sleep(2)
@@ -187,9 +197,11 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_auto_restore_devices())
 
     idle_task = asyncio.create_task(_release_idle_usbip_loop())
+    watchdog_task = asyncio.create_task(_usbipd_watchdog_loop())
 
     yield
     idle_task.cancel()
+    watchdog_task.cancel()
     logger.info("Shutting down Loki-PrintServer...")
     # Stop forwarding processes but keep saved state for auto-restore
     for state in forwarder.get_all_shared():

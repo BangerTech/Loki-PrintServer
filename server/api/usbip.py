@@ -139,7 +139,13 @@ class USBIPManager:
                 logger.warning(f"modprobe {mod}: {e}")
 
     async def _start_daemon(self):
-        """Start usbipd in the background."""
+        """Start a single fresh usbipd in the background.
+
+        Any stale usbipd (and its forked children) is killed first so we never
+        end up with two daemons fighting over port 3240 — a wedged parent that
+        stops accepting connections makes every `usbip attach`/`list` hang.
+        """
+        await self._kill_all_usbipd()
         try:
             self._daemon_proc = await asyncio.create_subprocess_exec(
                 "usbipd",
@@ -149,6 +155,74 @@ class USBIPManager:
             logger.info("usbipd daemon started")
         except FileNotFoundError:
             logger.error("usbipd not found - USB/IP sharing will not work")
+
+    async def _kill_all_usbipd(self):
+        """Terminate every usbipd process (parent + forked children)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "pkill", "-9", "-x", "usbipd",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.warning(f"pkill usbipd: {e}")
+        await asyncio.sleep(0.4)
+
+    async def _probe_daemon(self, timeout: float = 5.0) -> bool:
+        """True if usbipd accepts a TCP connection and answers a list request.
+
+        A wedged daemon still accepts the TCP handshake (so a port check looks
+        fine) but never replies, so we actually run a list and time it out.
+        """
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "usbip", "list", "-r", "127.0.0.1",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            # Any completed reply means the daemon is alive. "no exportable
+            # devices" is a healthy empty answer, not a hang.
+            return True
+        except asyncio.TimeoutError:
+            logger.warning("usbipd health probe timed out after %.0fs", timeout)
+            if proc is not None:
+                try:
+                    proc.kill()
+                    await proc.communicate()
+                except Exception:
+                    pass
+            return False
+        except FileNotFoundError:
+            # usbip binary missing is a different problem; don't thrash restarts
+            return True
+        except Exception as e:
+            logger.warning(f"usbipd health probe error: {e}")
+            return False
+
+    async def ensure_daemon_healthy(self):
+        """Watchdog: restart usbipd if it stopped answering, then re-bind shares."""
+        if await self._probe_daemon():
+            return
+        logger.warning("usbipd is not responding — restarting it")
+        self._daemon_proc = None
+        await self._start_daemon()
+        # Kernel bindings survive a daemon restart, but re-assert them so a
+        # device that somehow lost its export comes back. share_device is
+        # idempotent (treats "already bound" as success).
+        for bus_id in list(self._shared_bus_ids):
+            try:
+                await self.share_device(bus_id)
+            except Exception as e:
+                logger.warning(f"re-bind {bus_id} after daemon restart: {e}")
+        if await self._probe_daemon():
+            logger.info("usbipd recovered after restart")
+        else:
+            logger.error("usbipd still not responding after restart")
 
     async def list_devices(self) -> list[DeviceInfo]:
         """Enumerate all USB devices using pyusb."""
